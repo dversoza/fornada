@@ -1,5 +1,5 @@
 [workspace]
-members = ["game-core", "web"]
+members = ["game-core", "web", "worker"]
 resolver = "3"
 
 [profile.release]
@@ -7,3 +7,9 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
+
+# strip = true drops the target_features section, and wasm-bindgen then refuses to emit
+# the externref table the worker glue needs. The web crate is unaffected.
+[profile.worker]
+inherits = "release"
+strip = "debuginfo"

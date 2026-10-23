@@ -165,7 +165,7 @@ button{font:inherit;color:inherit}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import init, { Client, catalog_json } from '__GLUE__';
+import init, { Client, catalog_json, schema_version } from '__GLUE__';
 
 // Fundo de azulejo
 const tile = c => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='88' height='88' viewBox='0 0 88 88'><g fill='none' stroke='${c}' stroke-width='2'><rect x='1' y='1' width='86' height='86'/><path d='M44 14C52 28 60 36 74 44C60 52 52 60 44 74C36 60 28 52 14 44C28 36 36 28 44 14Z'/><circle cx='44' cy='44' r='7'/><path d='M0 18Q14 14 18 0M88 18Q74 14 70 0M0 70Q14 74 18 88M88 70Q74 74 70 88'/></g></svg>`)}")`;
@@ -194,22 +194,117 @@ function fmt(n, dec=0){
   return nf(0, n<1000 ? dec : 0).format(n);
 }
 
-// Salvar
-function save(){
-  try{ localStorage.setItem(SAVE_KEY, JSON.stringify({...JSON.parse(client.to_json()), t:Date.now()})); }catch(e){}
-}
-function load(){
-  let raw = null;
+// Servidor
+const OFFLINE_MSG = 'Sem conexão com o servidor. O progresso fica salvo neste aparelho.';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// version é null até um GET dar certo; sem version não há PUT.
+let version = null, acked = null, inflight = false, epoch = 0;
+// Versão do servidor em que o espelho carregado no boot se baseava.
+let bootV = null, lastMirrored = null;
+// JSONs enviados recentemente (normalizado -> original), para reconhecer o próprio PUT num 409.
+const sent = new Map();
+let outage = false, failures = 0, syncing = false, schemaWarned = false;
+
+// Espelho local: o jogo continua e não perde progresso com a API fora do ar.
+// v: versão do servidor em que este estado se baseia. Uma aba parada não reescreve o espelho.
+function baseV(){ return version ?? bootV; }
+function mirror(){
+  const json = client.to_json(), key = json + '|' + baseV();
+  if(key === lastMirrored) return;
   try{
-    raw = localStorage.getItem(SAVE_KEY);
-    if(!raw) return null;
-    client.load(raw);
-    return +JSON.parse(raw).t || null;
-  }catch(e){
-    if(raw) try{ localStorage.setItem(SAVE_KEY + '.bak', raw); }catch(_){}
-    return null;
-  }
+    localStorage.setItem(SAVE_KEY, JSON.stringify({...JSON.parse(json), t:Date.now(), v:baseV()}));
+    lastMirrored = key;
+  }catch(e){}
 }
+function hasMirror(){ try{ return localStorage.getItem(SAVE_KEY) !== null; }catch(e){ return false; } }
+function failed(){
+  if(++failures >= 3 && !outage){ outage = true; toast(OFFLINE_MSG); }
+}
+function adopt(state, v){
+  client.load(JSON.stringify(state));
+  version = v; acked = client.to_json(); sent.clear(); upKey = null; renderSeg();
+}
+const norm = json => JSON.stringify(JSON.parse(json));
+
+async function pushSave(keepalive){
+  const json = client.to_json();
+  if(version === null || (inflight && !keepalive) || json === acked) return 'skip';
+  const myEpoch = epoch;
+  if(!keepalive) inflight = true;
+  sent.set(norm(json), json);
+  if(sent.size > 5) sent.delete(sent.keys().next().value);
+  let after = null;
+  try{
+    const res = await fetch('/api/save', {method:'PUT', headers:{'content-type':'application/json'},
+      body:`{"state":${json},"version":${version},"schema_version":${schema_version()}}`, keepalive});
+    if(myEpoch !== epoch) return 'stale';
+    if(res.status === 200){
+      const b = await res.json();
+      failures = 0; outage = false;
+      if(b.clamped) adopt(b.state, b.version); else { version = b.version; acked = json; }
+      return 'ok';
+    }
+    if(res.status === 409){
+      const b = await res.json();
+      if(!b.state){ after = sync; return 'conflict'; }
+      const mine = sent.get(JSON.stringify(b.state));
+      if(mine !== undefined && (b.version === version || b.version === version + 1)){
+        if(b.version > version){ version = b.version; acked = mine; }
+      }else { adopt(b.state, b.version); toast('Progresso atualizado por outra aba.'); }
+      return 'conflict';
+    }
+    if(res.status === 429) return 'limited';
+    if(res.status === 401){ after = sync; return 'retry'; }
+    if(res.status === 400 && (await res.json().catch(() => ({}))).error === 'unsupported schema'){
+      if(!schemaWarned){ schemaWarned = true; toast('Nova versão do jogo disponível. Recarregue a página.'); }
+      return 'schema';
+    }
+    failed();
+  }catch(e){ failed(); }
+  finally{ if(!keepalive) inflight = false; if(after) setTimeout(after, 0); }
+  return 'retry';
+}
+
+// Primeira sincronização e reconexão: GET com espera crescente (5 s até 60 s).
+async function sync(){
+  if(syncing) return;
+  syncing = true;
+  try{
+    let delay = 5000, s;
+    const epoch0 = epoch, version0 = version;
+    for(;;){
+      try{ const res = await fetch('/api/save'); if(!res.ok) throw new Error(res.status); s = await res.json(); break; }
+      catch(e){
+        if(!outage){ outage = true; toast(OFFLINE_MSG); }
+        await sleep(delay); delay = Math.min(delay * 2, 60000);
+      }
+    }
+    outage = false; failures = 0;
+    // Um reset ou um save terminou enquanto o GET voava: o resultado está velho.
+    if(epoch !== epoch0 || version !== version0) return;
+    if(s.state === null){
+      version = 0; acked = null;
+      if(hasMirror()) await importMirror();
+    }else if(baseV() === s.version && client.total() > s.state.total){
+      version = s.version; acked = null;
+      await pushSave(false);
+    }else{
+      adopt(s.state, s.version);
+      if(s.offline > 0) setTimeout(()=>toast(`Enquanto você estava fora, a turma fez ${fmt(s.offline)} pães de queijo.`), 400);
+    }
+  }finally{ syncing = false; }
+}
+// Sem linha no servidor: envia o jogo local como versão 0. Desiste após 3 tentativas e mantém o espelho.
+async function importMirror(){
+  for(let i = 0; i < 3; i++){
+    const r = await pushSave(false);
+    if(r === 'ok' || r === 'conflict' || r === 'skip' || r === 'limited') return;
+    if(r === 'schema') break;
+    await sleep(5000);
+  }
+  if(version === 0) version = null;
+}
+function saveTick(keepalive){ mirror(); pushSave(keepalive); }
 
 // DOM
 const $ = id => document.getElementById(id);
@@ -286,7 +381,6 @@ const bItems = B.map((b, i) => {
     cost:btn.querySelector('.cost'), rate:btn.querySelector('.rate'), own:btn.querySelector('.own'), locked:false};
   btn.addEventListener('click', () => {
     if(it.locked || !client.buy_building(i)){ shake(btn); return; }
-    save();
   });
   bldsEl.appendChild(btn);
   return it;
@@ -342,7 +436,6 @@ function renderUpgrades(){
         if(!client.buy_upgrade(i)){ shake(btn); return; }
         upKey = null;
         toast(`Comprado: ${u.name}`);
-        save();
       });
       upsEl.appendChild(btn);
       upItems.push([u, btn]);
@@ -359,7 +452,7 @@ function renderUpgrades(){
 // Quantidade por compra
 const segBtns = document.querySelectorAll('.seg button');
 function renderSeg(){ segBtns.forEach(b => setAttr(b, 'aria-pressed', +b.dataset.n === client.buy())); }
-segBtns.forEach(b => b.addEventListener('click', () => { client.set_buy(+b.dataset.n); renderSeg(); save(); }));
+segBtns.forEach(b => b.addEventListener('click', () => { client.set_buy(+b.dataset.n); renderSeg(); }));
 
 // Cafezinho bônus
 let cafeEl = null, cafeUntil = 0, nextCafe = performance.now() + (30 + Math.random()*30)*1000;
@@ -375,7 +468,7 @@ function spawnCafe(now){
     if(kind === 0) toast('Café extraforte! Cliques ×77 por 13 segundos.');
     else if(kind === 1) toast('Cafezinho passado na hora! Produção ×7 por 30 segundos.');
     else toast(`Café com prosa: +${fmt(amount)} pães de queijo.`);
-    removeCafe(); save();
+    removeCafe();
   });
   stage.appendChild(cafeEl);
   cafeUntil = now + 13000;
@@ -387,17 +480,24 @@ function removeCafe(){
 
 // Reset
 const resetBtn = $('reset'); let resetTimer;
-resetBtn.addEventListener('click', () => {
+resetBtn.addEventListener('click', async () => {
   if(!resetBtn.classList.contains('armed')){
     resetBtn.classList.add('armed'); resetBtn.textContent = 'Toque de novo para apagar tudo';
     resetTimer = setTimeout(()=>{ resetBtn.classList.remove('armed'); resetBtn.textContent = 'Recomeçar do zero'; }, 3000);
     return;
   }
   clearTimeout(resetTimer);
-  client.reset();
-  upKey = null; renderSeg();
   resetBtn.classList.remove('armed'); resetBtn.textContent = 'Recomeçar do zero';
+  epoch++;
+  try{
+    const res = await fetch('/api/reset', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'});
+    if(!res.ok) throw new Error(res.status);
+    const b = await res.json();
+    client.reset();
+    adopt(b.state, b.version);
+  }catch(e){ toast('Não foi possível apagar agora. Tente de novo.'); return; }
   try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
+  lastMirrored = null;
   toast('Tudo apagado. A massa está pronta de novo.');
 });
 
@@ -425,27 +525,32 @@ function render(now){
 }
 
 // Loop
-let last = performance.now(), lastSave = last;
+let last = 0;
 function frame(now){
   const dt = Math.max(0, (now - last)/1000); last = now;
   client.tick(dt, now);
   if(!cafeEl && now >= nextCafe) spawnCafe(now);
   if(cafeEl && now >= cafeUntil) removeCafe();
-  if(now - lastSave > 5000){ save(); lastSave = now; }
   render(now);
   requestAnimationFrame(frame);
 }
 
-// Início
-const savedAt = load();
-renderSeg();
-if(savedAt){
-  const earned = client.apply_offline((Date.now() - savedAt)/1000);
-  if(earned > 0) setTimeout(()=>toast(`Enquanto você estava fora, a turma fez ${fmt(earned)} pães de queijo.`), 400);
+// Início: o jogo começa na hora com o espelho local; a API sincroniza em segundo plano.
+let raw = null;
+try{ raw = localStorage.getItem(SAVE_KEY); }catch(e){}
+if(raw){
+  try{ client.load(raw); bootV = JSON.parse(raw).v ?? null; }
+  catch(e){ try{ localStorage.setItem(SAVE_KEY + '.bak', raw); }catch(_){} }
 }
-document.addEventListener('visibilitychange', () => { if(document.hidden) save(); });
-addEventListener('pagehide', save);
+renderSeg();
+setInterval(() => saveTick(false), 30000);
+document.addEventListener('visibilitychange', () => { if(document.hidden) saveTick(true); });
+addEventListener('pagehide', () => saveTick(true));
+addEventListener('pageshow', e => { if(e.persisted) sync(); });
+last = performance.now();
+nextCafe = last + (30 + Math.random()*30)*1000;
 requestAnimationFrame(frame);
+sync();
 </script>
 </body>
 </html>

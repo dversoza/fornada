@@ -1,0 +1,10 @@
+{
+  "name": "fornada",
+  "private": true,
+  "scripts": {
+    "test": "scripts/test-api.sh"
+  },
+  "devDependencies": {
+    "wrangler": "4.152.0"
+  }
+}

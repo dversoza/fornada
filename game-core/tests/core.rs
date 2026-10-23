@@ -1,4 +1,6 @@
-use game_core::save::{SAVE_SCHEMA_VERSION, SaveError, Violation, load_save, to_json, validate};
+use game_core::save::{
+    CAFE_CREDIT_START, SAVE_SCHEMA_VERSION, SaveError, Violation, load_save, to_json, validate,
+};
 use game_core::*;
 
 // Dumped by node from the prototype HTML: B, TIERS and UPGRADES, with every unlock
@@ -817,6 +819,52 @@ fn cafe_rolls_buffs_and_lucky_gain() {
 }
 
 #[test]
+fn prod_buff_pays_only_until_it_expires_within_a_long_frame() {
+    let state = funded(0.0, 0.0, &[("forno", 10)], &[]);
+    let pps = base_pps(&state);
+    let mut game = Game {
+        state,
+        ..Game::default()
+    };
+    game.cafe(0.3, 0.0);
+    // Frame [0, 300 s] but the x7 boost ends at 30 s: 7*pps*30 + pps*270.
+    game.tick(300.0, 300_000.0);
+    assert!(close(game.state.total, 7.0 * pps * 30.0 + pps * 270.0));
+    assert!(game.buffs.is_empty());
+
+    // 10 s left at the start of a 300 s frame.
+    let mut game = Game {
+        state: funded(0.0, 0.0, &[("forno", 10)], &[]),
+        ..Game::default()
+    };
+    game.buffs.push(Buff {
+        kind: BuffKind::Prod,
+        mult: 7.0,
+        until_ms: 10_000.0,
+    });
+    game.tick(300.0, 300_000.0);
+    assert!(close(game.state.total, 7.0 * pps * 10.0 + pps * 290.0));
+
+    // Two overlapping boosts multiply while both are active.
+    let mut game = Game {
+        state: funded(0.0, 0.0, &[("forno", 10)], &[]),
+        ..Game::default()
+    };
+    for until_ms in [10_000.0, 20_000.0] {
+        game.buffs.push(Buff {
+            kind: BuffKind::Prod,
+            mult: 7.0,
+            until_ms,
+        });
+    }
+    game.tick(30.0, 30_000.0);
+    assert!(close(
+        game.state.total,
+        49.0 * pps * 10.0 + 7.0 * pps * 10.0 + pps * 10.0
+    ));
+}
+
+#[test]
 fn offline_gain_caps_and_thresholds() {
     // Values from the prototype's offline math with 100 vovo (10/s).
     let s = state(&[("vovo", 100)], &[]);
@@ -879,6 +927,22 @@ fn prototype_save_loads_and_round_trips() {
     assert_eq!(violations, [Violation::InvalidBuy(7)]);
 }
 
+/// `validate` with an explicit credit, as a tuple.
+fn vc(
+    prev: &GameState,
+    next: GameState,
+    elapsed: Option<f64>,
+    credit: f64,
+) -> (GameState, Vec<Violation>) {
+    let v = validate(prev, next, elapsed, credit);
+    (v.state, v.violations)
+}
+
+/// `validate` with the credit of a new row.
+fn vd(prev: &GameState, next: GameState, elapsed: Option<f64>) -> (GameState, Vec<Violation>) {
+    vc(prev, next, elapsed, CAFE_CREDIT_START)
+}
+
 #[test]
 fn load_save_rejects_bad_version_and_shapes() {
     assert!(matches!(
@@ -904,7 +968,7 @@ fn load_save_rejects_bad_version_and_shapes() {
     // JSON.stringify writes null for Infinity and NaN: loads as NaN, validate replaces it.
     let (loaded, _) = load_save(1, r#"{"bank":null,"total":50}"#).unwrap();
     assert!(loaded.bank.is_nan());
-    let (out, v) = validate(&GameState::default(), loaded, None);
+    let (out, v) = vd(&GameState::default(), loaded, None);
     assert_eq!((out.bank, out.total), (0.0, 50.0));
     assert_eq!(v, [Violation::InvalidAmount { field: "bank" }]);
 }
@@ -941,6 +1005,7 @@ const STEP: f64 = 0.025;
 struct Client {
     game: Game,
     accepted: GameState,
+    cafe_credit: f64,
     violations: Vec<Violation>,
     now_ms: f64,
     since_save: f64,
@@ -957,6 +1022,7 @@ impl Client {
                 ..Game::default()
             },
             accepted: GameState::default(),
+            cafe_credit: CAFE_CREDIT_START,
             violations: Vec::new(),
             now_ms: 0.0,
             since_save: 0.0,
@@ -971,13 +1037,14 @@ impl Client {
     fn submit(&mut self, elapsed: Option<f64>) {
         let json = to_json(&self.game.state);
         let (loaded, mut violations) = load_save(SAVE_SCHEMA_VERSION, &json).unwrap();
-        let (checked, more) = validate(&self.accepted, loaded, elapsed);
-        violations.extend(more);
+        let checked = validate(&self.accepted, loaded, elapsed, self.cafe_credit);
+        violations.extend(checked.violations);
         assert_eq!(
-            checked, self.game.state,
+            checked.state, self.game.state,
             "validation changed an honest save"
         );
-        self.accepted = checked;
+        self.accepted = checked.state;
+        self.cafe_credit = checked.cafe_credit;
         self.violations.extend(violations);
     }
 
@@ -1070,6 +1137,11 @@ fn honest_session_produces_no_violations() {
     c.play(5.0, 20);
     c.save(0.0);
 
+    // A boost with 30 s left, then a 600 s hidden frame: it pays only until it expires.
+    assert_eq!(c.cafe(0.3), CafeOutcome::ProdBoost);
+    c.hidden_frame(600.0);
+    c.save(0.0);
+
     // Latency skew: the server sees 8 s less, then 8 s more.
     c.play(20.0, 40);
     c.save(8.0);
@@ -1104,63 +1176,79 @@ fn honest_session_produces_no_violations() {
 
 #[test]
 fn validate_bound_is_exact_and_clamps_inflated_total_and_clicks() {
-    // Slack 10 s and 40 clicks/s. No production, 20 s window: one cafe frenzy,
-    // 76 * 13 * 40 * 1 = 39520, is all that is allowed.
+    // Slack 10 s and 40 clicks/s; elapsed 0 means a 10 s window and no credit refill.
+    // No production: one cafe frenzy, 76 * 13 * 40 * 1 = 39520, is the whole allowance.
     let claim = funded(1e9, 1e9, &[], &[]);
-    let (out, v) = validate(&GameState::default(), claim.clone(), Some(10.0));
-    assert_eq!((out.total, out.bank), (39520.0, 39520.0));
+    let v = validate(&GameState::default(), claim.clone(), Some(0.0), 1.0);
+    assert_eq!((v.state.total, v.state.bank), (39520.0, 39520.0));
     assert_eq!(
-        v,
+        v.violations,
         [Violation::TotalTooHigh {
             claimed: 1e9,
             allowed: 39520.0
         }]
     );
+    assert_eq!(v.cafe_credit, 0.0);
 
-    // The cafe allowance grows by one per started 30 s of the slackened window.
-    let allowed = |elapsed| {
-        validate(&GameState::default(), claim.clone(), Some(elapsed))
-            .0
-            .total
+    // The allowance is the credit: refilled by raw elapsed / 30 s and capped at 2.
+    let allowed = |elapsed, credit| {
+        let v = validate(&GameState::default(), claim.clone(), Some(elapsed), credit);
+        (v.state.total, v.cafe_credit)
     };
-    assert_eq!(allowed(19.999), 39520.0);
-    assert_eq!(allowed(20.0), 2.0 * 39520.0);
-    assert_eq!(allowed(100.0), 4.0 * 39520.0);
+    assert_eq!(allowed(0.0, 0.0), (0.0, 0.0));
+    assert_eq!(allowed(15.0, 0.0), (0.5 * 39520.0, 0.0));
+    assert_eq!(allowed(30.0, 0.0), (39520.0, 0.0));
+    assert_eq!(allowed(60.0, 0.0), (2.0 * 39520.0, 0.0));
+    assert_eq!(allowed(6000.0, 0.0), (2.0 * 39520.0, 0.0));
+    assert_eq!(allowed(0.0, 1.5), (1.5 * 39520.0, 0.0));
+    assert_eq!(allowed(0.0, 5.0), (2.0 * 39520.0, 0.0));
+    // Slack widens the production and click window, never the credit.
+    assert!(allowed(29.9, 0.0).0 < 39520.0);
 
-    // 10 vovo/s, 18 s window: 720 clicks, bound = 10*18 + 720*1 + 39520 = 40420.
+    // 10 vovo/s, 10 s window: 400 clicks, base = 10*10 + 400*1 = 500, bound = 500 + 39520.
     let prev = funded(1e6, 1e6, &[("vovo", 100)], &[]);
     let mut cheat = funded(1e6 + 1e7, 1e6 + 1e7, &[("vovo", 100)], &[]);
     cheat.clicks = 100000;
-    let (out, v) = validate(&prev, cheat, Some(8.0));
+    let (out, v) = vc(&prev, cheat, Some(0.0), 1.0);
     assert_eq!(
         (out.clicks, out.total, out.bank),
-        (720, 1040420.0, 1040420.0)
+        (400, 1040020.0, 1040020.0)
     );
     assert_eq!(
         v,
         [
             Violation::TooManyClicks {
                 claimed: 100000,
-                allowed: 720
+                allowed: 400
             },
             Violation::TotalTooHigh {
                 claimed: 1e7,
-                allowed: 40420.0
+                allowed: 40020.0
             }
         ]
     );
 
-    // Without clicks the bound is 10*18 + 39520, and a total exactly at it is untouched.
-    let at_bound = funded(1e6 + 39700.0, 1e6 + 39700.0, &[("vovo", 100)], &[]);
-    let (out, v) = validate(&prev, at_bound.clone(), Some(8.0));
-    assert_eq!((out, v), (at_bound, vec![]));
+    // Without clicks the bound is 10*10 + 39520. A total exactly at it is untouched and
+    // spends the whole credit.
+    let at_bound = funded(1e6 + 39620.0, 1e6 + 39620.0, &[("vovo", 100)], &[]);
+    let v = validate(&prev, at_bound.clone(), Some(0.0), 1.0);
+    assert_eq!(
+        (v.state, v.violations, v.cafe_credit),
+        (at_bound, vec![], 0.0)
+    );
+
+    // Gain within base spends no credit.
+    let within = funded(1e6 + 50.0, 1e6 + 50.0, &[("vovo", 100)], &[]);
+    let v = validate(&prev, within, Some(0.0), 1.0);
+    assert_eq!((v.violations, v.cafe_credit), (vec![], 1.0));
 
     // Fake items must not raise the bound. Every building and upgrade claimed at once is
     // reverted as unaffordable, and the total is clamped again with the real (empty) items.
     let mut fake = funded(2e18, 2e18, &[], &[]);
     fake.owned = [u32::MAX; BUILDING_COUNT];
     fake.ups = (1u64 << upgrades().len()) - 1;
-    let (out, v) = validate(&GameState::default(), fake, Some(1.0));
+    let v = validate(&GameState::default(), fake, Some(0.0), 1.0);
+    let (out, violations) = (v.state, v.violations);
     assert_eq!(
         (out.total, out.owned, out.ups),
         (39520.0, [0; BUILDING_COUNT], 0)
@@ -1170,50 +1258,96 @@ fn validate_bound_is_exact_and_clamps_inflated_total_and_clicks() {
         "{}",
         out.bank
     );
-    assert!(v.contains(&Violation::Unaffordable {
+    assert!(violations.contains(&Violation::Unaffordable {
         expected: f64::INFINITY
     }));
     assert!(matches!(
-        v.last(),
+        violations.last(),
         Some(Violation::TotalTooHigh {
             allowed: 39520.0,
             ..
         })
     ));
+    // The credit is charged for the final (reverted) state, not the fake one.
+    assert_eq!(v.cafe_credit, 0.0);
 
     // Locked upgrades raise pps and click value only until they are dropped.
     // With 5 forno (5/s): forno-1, forno-2 and p3 give pps 20 and cv 1.2, bound
-    // 20*20 + 39520*1.2 = 47824. Once dropped: 5*20 + 39520 = 39620.
+    // 20*10 + 39520*1.2 = 47624. Once dropped: 5*10 + 39520 = 39570.
     let prev = funded(0.0, 0.0, &[("forno", 5)], &[]);
     let cheat = funded(1e12, 1e12, &[("forno", 5)], &["forno-1", "forno-2", "p3"]);
-    let (out, v) = validate(&prev, cheat, Some(10.0));
-    assert_eq!((out.total, out.bank, out.ups), (39620.0, 39620.0, 0));
+    let v = validate(&prev, cheat, Some(0.0), 1.0);
     assert_eq!(
-        v,
+        (v.state.total, v.state.bank, v.state.ups),
+        (39570.0, 39570.0, 0)
+    );
+    assert_eq!(
+        v.violations,
         [
             Violation::TotalTooHigh {
                 claimed: 1e12,
-                allowed: 47824.0
+                allowed: 47624.0
             },
             Violation::LockedUpgrade("p3".into()),
             Violation::LockedUpgrade("forno-1".into()),
             Violation::LockedUpgrade("forno-2".into()),
             Violation::TotalTooHigh {
-                claimed: 47824.0,
-                allowed: 39620.0
+                claimed: 47624.0,
+                allowed: 39570.0
             },
         ]
     );
+    assert_eq!(v.cafe_credit, 0.0);
 
     // High production: the lucky cafe (900 * 1000 + 13) beats the frenzy,
-    // bound = 1000*20 + 900013.
+    // bound = 1000*10 + 900013.
     let prev = funded(0.0, 0.0, &[("vovo", 10000)], &[]);
-    let (out, _) = validate(
+    let (out, _) = vc(
         &prev,
         funded(1e12, 1e12, &[("vovo", 10000)], &[]),
-        Some(10.0),
+        Some(0.0),
+        1.0,
     );
-    assert_eq!((out.total, out.bank), (920013.0, 920013.0));
+    assert_eq!((out.total, out.bank), (910013.0, 910013.0));
+}
+
+#[test]
+fn frequent_puts_cannot_farm_cafe_allowances() {
+    // 100 vovo (10/s). The worker refuses PUTs closer than 5 s, so the fastest farmer saves
+    // every 5 s and claims 1e9 more than the last accepted total each time.
+    // Per-PUT ceiling: pps * (elapsed + 10 s slack) + elapsed/30 of a cafe. The slack is
+    // granted on every PUT, so it is still farmable: at most 10 s of production per 5 s
+    // (3x production), bounded by the 5 s floor, not by the credit.
+    let items = [("vovo", 100)];
+    let mut accepted = funded(1e6, 1e6, &items, &[]);
+    let mut credit = CAFE_CREDIT_START;
+    let gap = 5.0;
+    let base = 10.0 * (gap + 10.0);
+    let extra = 76.0 * 13.0 * 40.0;
+    let mut gains = Vec::new();
+    for _ in 0..200 {
+        let claim = funded(accepted.total + 1e9, accepted.total + 1e9, &items, &[]);
+        let v = validate(&accepted, claim, Some(gap), credit);
+        assert!(
+            v.violations
+                .iter()
+                .any(|x| matches!(x, Violation::TotalTooHigh { .. }))
+        );
+        gains.push(v.state.total - accepted.total);
+        accepted = v.state;
+        credit = v.cafe_credit;
+    }
+    // The first PUT spends the starting allowance plus its own refill.
+    let first = base + (CAFE_CREDIT_START + gap / 30.0) * extra;
+    assert!(close(gains[0], first), "{} vs {first}", gains[0]);
+    // Afterwards each PUT gets the ceiling and nothing more: no full cafe per PUT.
+    let steady = base + gap / 30.0 * extra;
+    for g in &gains[1..] {
+        assert!(close(*g, steady), "{g} vs {steady}");
+    }
+    let sum: f64 = gains.iter().sum();
+    let ceiling = 200.0 * base + (CAFE_CREDIT_START + 200.0 * gap / 30.0) * extra;
+    assert!(sum <= ceiling * (1.0 + 1e-9), "{sum} > {ceiling}");
 }
 
 #[test]
@@ -1224,7 +1358,7 @@ fn validate_enforces_monotone_unlock_and_spending() {
     prev.clicks = 100;
     let mut regressed = funded(500.0, 900.0, &[("vovo", 2)], &[]);
     regressed.clicks = 50;
-    let (out, v) = validate(&prev, regressed, Some(100.0));
+    let (out, v) = vd(&prev, regressed, Some(100.0));
     assert_eq!(out, prev);
     assert_eq!(
         v,
@@ -1239,20 +1373,20 @@ fn validate_enforces_monotone_unlock_and_spending() {
     // c1 was paid for (100) and stays; c3 needs total 5000 and is dropped unpaid.
     let prev = funded(200.0, 200.0, &[], &[]);
     let next = funded(100.0, 200.0, &[], &["c1", "c3"]);
-    let (out, v) = validate(&prev, next, Some(10.0));
+    let (out, v) = vd(&prev, next, Some(10.0));
     assert_eq!((out.ups, out.bank), (c1, 100.0));
     assert_eq!(v, [Violation::LockedUpgrade("c3".into())]);
 
     // Honest x10 purchase: ceil(304.55) = 305 paid, no violation.
     let prev = funded(400.0, 400.0, &[], &[]);
     let paid = funded(95.0, 400.0, &[("vovo", 10)], &[]);
-    let (out, v) = validate(&prev, paid.clone(), Some(60.0));
+    let (out, v) = vd(&prev, paid.clone(), Some(60.0));
     assert_eq!((out, v), (paid, vec![]));
 
     // Same purchase without paying and affordable: items stay, bank is rebuilt from the
     // invariant. Exact cost from the prototype JS.
     let prev = funded(1000.0, 1000.0, &[], &[]);
-    let (out, v) = validate(
+    let (out, v) = vd(
         &prev,
         funded(1000.0, 1000.0, &[("vovo", 10)], &[]),
         Some(60.0),
@@ -1270,7 +1404,7 @@ fn validate_enforces_monotone_unlock_and_spending() {
     // Local import (no elapsed): no time bound, but spending must still add up.
     // 50 vovo exact cost from the prototype JS, plus vovo-0 at 150.
     let import = funded(1e6, 1e6, &[("vovo", 50)], &["vovo-0"]);
-    let (out, v) = validate(&GameState::default(), import, None);
+    let (out, v) = vd(&GameState::default(), import, None);
     assert!(
         close(out.bank, 1e6 - (108265.74415839535 + 150.0)),
         "{}",
@@ -1282,7 +1416,7 @@ fn validate_enforces_monotone_unlock_and_spending() {
     // Unaffordable claims are reverted. 1.15^10000 overflows, so the cost is infinite
     // and every NaN-prone comparison must still flag it.
     let prev = funded(1e6, 1e6, &[], &[]);
-    let (out, v) = validate(&prev, funded(1e6, 1e6, &[("lua", 10000)], &[]), Some(10.0));
+    let (out, v) = vd(&prev, funded(1e6, 1e6, &[("lua", 10000)], &[]), Some(10.0));
     assert_eq!(out, prev);
     assert_eq!(
         v,
@@ -1292,7 +1426,7 @@ fn validate_enforces_monotone_unlock_and_spending() {
     );
 
     // Finite but beyond the total ever earned (cost 2583487391540615).
-    let (out, v) = validate(&prev, funded(1e6, 1e6, &[("lua", 100)], &[]), Some(10.0));
+    let (out, v) = vd(&prev, funded(1e6, 1e6, &[("lua", 100)], &[]), Some(10.0));
     assert_eq!(out, prev);
     match v.as_slice() {
         [Violation::Unaffordable { expected }] => assert!(close(*expected, 2583487391540615.0)),
@@ -1301,7 +1435,7 @@ fn validate_enforces_monotone_unlock_and_spending() {
 
     // Unaffordable upgrade alone (150 > total 100).
     let prev = funded(100.0, 100.0, &[("vovo", 1)], &[]);
-    let (out, v) = validate(
+    let (out, v) = vd(
         &prev,
         funded(100.0, 100.0, &[("vovo", 1)], &["vovo-0"]),
         Some(10.0),
@@ -1312,7 +1446,7 @@ fn validate_enforces_monotone_unlock_and_spending() {
     // After the revert the bank is checked against the previous spend: it cannot rise
     // from 5e5 to 9e5 without income.
     let prev = funded(5e5, 1e6, &[], &[]);
-    let (out, v) = validate(&prev, funded(9e5, 1e6, &[("lua", 100)], &[]), Some(10.0));
+    let (out, v) = vd(&prev, funded(9e5, 1e6, &[("lua", 100)], &[]), Some(10.0));
     assert_eq!((out.owned, out.bank), (prev.owned, 5e5));
     assert!(matches!(
         v.as_slice(),
@@ -1332,7 +1466,7 @@ fn validate_enforces_monotone_unlock_and_spending() {
         buy: 7,
         ..GameState::default()
     };
-    let (out, v) = validate(&prev, junk, None);
+    let (out, v) = vd(&prev, junk, None);
     assert_eq!((out.bank, out.total, out.buy), (10.0, 20.0, 1));
     assert_eq!(
         v,
@@ -1345,7 +1479,7 @@ fn validate_enforces_monotone_unlock_and_spending() {
 
     // Final clamp, reachable only when the previous state is itself inconsistent.
     let corrupt = funded(500.0, 100.0, &[], &[]);
-    let (out, v) = validate(&corrupt, corrupt.clone(), None);
+    let (out, v) = vd(&corrupt, corrupt.clone(), None);
     assert_eq!(out.bank, 100.0);
     assert_eq!(v, [Violation::BankOutOfRange]);
 }

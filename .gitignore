@@ -3,3 +3,6 @@
 dist/
 .claude/
 .cloudflare/
+node_modules/
+.wrangler/
+worker/build/

@@ -1,7 +1,7 @@
 use game_core::{
     BUILDINGS, BuffKind, CafeOutcome, Game, GameState, available_upgrades, building_mult, cost_for,
-    offline_gain, revealed,
-    save::{load_save, to_json, validate},
+    revealed,
+    save::{CAFE_CREDIT_START, SAVE_SCHEMA_VERSION, load_save, to_json, validate},
     upgrades,
 };
 use serde_json::json;
@@ -28,8 +28,8 @@ impl Client {
     }
 
     pub fn load(&mut self, json: &str) -> Result<(), JsError> {
-        let (state, _) = load_save(1, json).map_err(|e| JsError::new(&format!("{e:?}")))?;
-        self.game.state = validate(&GameState::default(), state, None).0;
+        let (state, _) = load_save(1, json).map_err(|e| JsError::new(&e.to_string()))?;
+        self.game.state = validate(&GameState::default(), state, None, CAFE_CREDIT_START).state;
         Ok(())
     }
 
@@ -128,13 +128,11 @@ impl Client {
             })
             .collect()
     }
+}
 
-    pub fn apply_offline(&mut self, away_secs: f64) -> f64 {
-        let earned = offline_gain(&self.game.state, away_secs);
-        self.game.state.bank += earned;
-        self.game.state.total += earned;
-        earned
-    }
+#[wasm_bindgen]
+pub fn schema_version() -> u32 {
+    SAVE_SCHEMA_VERSION
 }
 
 #[wasm_bindgen]
@@ -207,14 +205,5 @@ mod tests {
         assert_eq!(client.buffs(), vec![1.0, 77.0, 13100.0, 0.0, 7.0, 30100.0]);
         // min(1000 * 0.15, base_pps 20 * 900) + 13
         assert_eq!(client.cafe(0.9, 100.0), vec![2.0, 163.0]);
-
-        let (bank, total) = (client.bank(), client.total());
-        assert_eq!(client.apply_offline(30.0), 0.0);
-        // base_pps 20 * 3600 s * 0.5
-        assert_eq!(client.apply_offline(3600.0), 36000.0);
-        assert_eq!(
-            (client.bank(), client.total()),
-            (bank + 36000.0, total + 36000.0)
-        );
     }
 }

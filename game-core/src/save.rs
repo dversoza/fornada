@@ -11,12 +11,27 @@ pub const CLICKS_PER_SEC: f64 = 40.0;
 pub const CAFE_MIN_GAP_SECS: f64 = 30.0;
 /// Latency skew between consecutive PUTs on mobile networks.
 pub const DT_SLACK_SECS: f64 = 10.0;
+/// Cafe allowances a player can bank, one earned per `CAFE_MIN_GAP_SECS` of server time.
+pub const CAFE_CREDIT_CAP: f64 = 2.0;
+/// Credit of a new save row.
+pub const CAFE_CREDIT_START: f64 = 1.0;
 
 #[derive(Debug)]
 pub enum SaveError {
     UnsupportedVersion(u32),
     Malformed(serde_json::Error),
 }
+
+impl std::fmt::Display for SaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedVersion(v) => write!(f, "unsupported save schema version {v}"),
+            Self::Malformed(e) => write!(f, "malformed save: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for SaveError {}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Violation {
@@ -154,25 +169,31 @@ fn is_valid_amount(x: f64) -> bool {
     x.is_finite() && x >= 0.0
 }
 
+/// Largest total gain plausible for `next`'s items and clicks without cafe credit,
+/// and the extra one full cafe allowance adds on top.
+fn gain_bound(prev: &GameState, next: &GameState, dt: f64) -> (f64, f64) {
+    let pps = base_pps(next);
+    let cv = click_base(next);
+    let click_frenzy = 76.0 * 13.0 * CLICKS_PER_SEC * cv;
+    let lucky = 900.0 * pps + 13.0;
+    // A prod boost adds 6*30*(pps + 40*cv), always below max(click_frenzy, lucky), so it is omitted.
+    let cafe_extra = click_frenzy.max(lucky);
+    let d_clicks = (next.clicks - prev.clicks) as f64;
+    (pps * dt + d_clicks * cv, cafe_extra)
+}
+
 /// Clamps the total gained since `prev` to the largest plausible amount for `next`'s
 /// items and clicks; the bank loses the same excess. No-op without elapsed time.
 fn clamp_total(
     prev: &GameState,
     next: &mut GameState,
     dt: Option<f64>,
+    credit: f64,
     violations: &mut Vec<Violation>,
 ) {
     let Some(dt) = dt else { return };
-    let pps = base_pps(next);
-    let cv = click_base(next);
-    // ponytail: every PUT gets one cafe allowance, so frequent PUTs can farm it. Add a server-side cafe credit or a PUT rate limit.
-    let n_cafe = (dt / CAFE_MIN_GAP_SECS).floor() + 1.0;
-    let click_frenzy = 76.0 * 13.0 * CLICKS_PER_SEC * cv;
-    let lucky = 900.0 * pps + 13.0;
-    // A prod boost adds 6*30*(pps + 40*cv), always below max(click_frenzy, lucky), so it is omitted.
-    let cafe_extra = click_frenzy.max(lucky);
-    let d_clicks = (next.clicks - prev.clicks) as f64;
-    let bound = pps * dt + d_clicks * cv + n_cafe * cafe_extra;
+    let (base, cafe_extra) = gain_bound(prev, next, dt);
+    let bound = base + credit * cafe_extra;
 
     let claimed = next.total - prev.total;
     if claimed > bound {
@@ -186,14 +207,24 @@ fn clamp_total(
     }
 }
 
+pub struct Validated {
+    pub state: GameState,
+    pub violations: Vec<Violation>,
+    /// Persist this for the next save.
+    pub cafe_credit: f64,
+}
+
 /// Light anti-cheat: never rejects, clamps to the largest plausible value and reports
 /// what it changed. `elapsed_secs` is server time since the last accepted save; `None`
-/// (first save or local import) skips the time-based bound.
+/// (first save or local import) skips the time-based bound and keeps `cafe_credit`.
+/// The credit is a token bucket: elapsed time refills it, and gain above the no-cafe
+/// bound drains it, so frequent saves cannot farm cafe allowances.
 pub fn validate(
     prev: &GameState,
     mut next: GameState,
     elapsed_secs: Option<f64>,
-) -> (GameState, Vec<Violation>) {
+    cafe_credit: f64,
+) -> Validated {
     let mut violations = Vec::new();
 
     if !is_valid_amount(next.bank) {
@@ -229,6 +260,10 @@ pub fn validate(
         violations.push(Violation::NotMonotone { field: "total" });
     }
 
+    let credit = match elapsed_secs {
+        Some(elapsed) => (cafe_credit + elapsed.max(0.0) / CAFE_MIN_GAP_SECS).min(CAFE_CREDIT_CAP),
+        None => cafe_credit,
+    };
     let dt = elapsed_secs.map(|elapsed| elapsed.max(0.0) + DT_SLACK_SECS);
     if let Some(dt) = dt {
         let allowed_clicks = (CLICKS_PER_SEC * dt).ceil() as u64;
@@ -241,7 +276,7 @@ pub fn validate(
             next.clicks = prev.clicks + allowed_clicks;
         }
     }
-    clamp_total(prev, &mut next, dt, &mut violations);
+    clamp_total(prev, &mut next, dt, credit, &mut violations);
 
     let all = upgrades();
     let mut dropped_locked = false;
@@ -254,7 +289,7 @@ pub fn validate(
     }
     // The bound depends on the items, so it is recomputed whenever they change.
     if dropped_locked {
-        clamp_total(prev, &mut next, dt, &mut violations);
+        clamp_total(prev, &mut next, dt, credit, &mut violations);
     }
 
     // total - bank is the cumulative spend. ceil makes honest spending >= the exact cost.
@@ -281,7 +316,7 @@ pub fn validate(
             violations.push(Violation::Unaffordable { expected });
             next.owned = prev.owned;
             next.ups = prev.ups;
-            clamp_total(prev, &mut next, dt, &mut violations);
+            clamp_total(prev, &mut next, dt, credit, &mut violations);
             let spent = prev.total - prev.bank;
             if underpaid(&next, spent) {
                 violations.push(Violation::Underpaid {
@@ -298,5 +333,17 @@ pub fn validate(
         violations.push(Violation::BankOutOfRange);
     }
 
-    (next, violations)
+    // Spend what the final state used beyond the no-cafe bound.
+    let cafe_credit = match dt {
+        Some(dt) => {
+            let (base, cafe_extra) = gain_bound(prev, &next, dt);
+            (credit - (next.total - prev.total - base).max(0.0) / cafe_extra).max(0.0)
+        }
+        None => cafe_credit,
+    };
+    Validated {
+        state: next,
+        violations,
+        cafe_credit,
+    }
 }

@@ -418,9 +418,34 @@ impl Game {
         self.state.total += amount;
     }
 
-    /// Production first with the current buffs, then expiry (prototype frame order).
+    /// Production first, then expiry (prototype frame order). The frame covers
+    /// `[now_ms - dt, now_ms]` and a production buff multiplies only the part before its
+    /// `until_ms`, so a long hidden-tab frame cannot earn the boost past its expiry.
+    /// The prototype applied the buff to the whole frame; this deviation is deliberate.
     pub fn tick(&mut self, dt_secs: f64, now_ms: f64) {
-        self.gain(self.pps() * dt_secs.max(0.0));
+        let dt_secs = dt_secs.max(0.0);
+        let start_ms = now_ms - dt_secs * 1000.0;
+        let mut cuts: Vec<f64> = self
+            .buffs
+            .iter()
+            .filter(|b| b.kind == BuffKind::Prod && b.until_ms > start_ms && b.until_ms < now_ms)
+            .map(|b| b.until_ms)
+            .collect();
+        cuts.sort_by(f64::total_cmp);
+        cuts.push(now_ms);
+        let base = base_pps(&self.state);
+        let mut from_ms = start_ms;
+        let mut gained = 0.0;
+        for to_ms in cuts {
+            let mult = self
+                .buffs
+                .iter()
+                .filter(|b| b.kind == BuffKind::Prod && b.until_ms > from_ms)
+                .fold(1.0, |m, b| m * b.mult);
+            gained += base * mult * (to_ms - from_ms) / 1000.0;
+            from_ms = to_ms;
+        }
+        self.gain(gained);
         self.buffs.retain(|b| b.until_ms > now_ms);
     }
 
