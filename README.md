@@ -58,7 +58,7 @@ O token da Cloudflare precisa de D1 Edit, Workers Scripts Edit e, na zona versoz
 
 ## Configuração
 
-Não há segredos nem variáveis. O `wrangler.jsonc` define o domínio `fornada.versoza.dev` (`workers_dev` desligado), o binding `DB`, Smart Placement e Workers Logs. Os assets com hash recebem `Cache-Control: public, max-age=31536000, immutable` via `web/_headers`. O `index.html` revalida a cada acesso.
+Não há segredos nem variáveis. O `wrangler.jsonc` define o domínio `fornada.versoza.dev` (`workers_dev` desligado), o binding `DB`, o Worker fixado perto do primário do D1 (`placement.region` `aws:us-east-1`) e Workers Logs. Os assets com hash recebem `Cache-Control: public, max-age=31536000, immutable` via `web/_headers`. O `index.html` revalida a cada acesso.
 
 ## API
 
@@ -70,7 +70,28 @@ Não há segredos nem variáveis. O `wrangler.jsonc` define o domínio `fornada.
 
 Erros: 401 sem sessão, 403 para requisição de outro site, 409 em versão desatualizada (com o estado atual no corpo), 413 acima de 8 KB, 415 sem JSON, 429 se o último save tem menos de 5 s.
 
-O cliente salva a cada 30 s quando o estado muda, e também ao esconder ou fechar a aba, com `keepalive`. Ele também mantém uma cópia em `localStorage`, então o jogo continua sem servidor e sincroniza depois.
+O cliente salva a cada 30 s quando o estado muda, e também ao esconder ou fechar a aba, com `keepalive`. O botão Salvar agora, em Ajustes, força um save imediato. O cliente também mantém uma cópia em `localStorage`, então o jogo continua sem servidor e sincroniza depois.
+
+## Dados
+
+Cada jogador ocupa uma linha da tabela `saves`:
+
+| Coluna | Tipo | Conteúdo |
+|---|---|---|
+| `player_id` | TEXT, chave primária | UUID do cookie `__Host-pid` |
+| `state` | TEXT | save em JSON, formato v1 |
+| `schema_version` | INTEGER | versão do formato do save (hoje 1) |
+| `version` | INTEGER | contador da concorrência otimista |
+| `updated_at` | INTEGER | último save aceito, em ms, relógio do servidor |
+| `cafe_credit` | REAL | crédito de cafezinho do anti-trapaça |
+
+O `state` usa o mesmo formato do save local do protótipo:
+
+```json
+{"bank":1274.79,"total":58323.79,"clicks":1254,"owned":{"vovo":32,"forno":22},"ups":["c1","vovo-0"],"buy":1}
+```
+
+Em produção, o `state` médio tem 65 bytes e o maior tem 189. Um save com todos os prédios e todas as melhorias tem 553 bytes. Com a chave e o índice, cada jogador ocupa de 150 a 700 bytes, então os 5 GB do plano Free comportam milhões de jogadores.
 
 ## Anti-trapaça
 
@@ -89,7 +110,7 @@ Feitas em 23/10/2026, logo após o deploy, a partir da máquina de desenvolvimen
 | CPU por requisição p50 / p99 | 1,9 ms / 24 ms (105 requisições, 0 erros) |
 | WASM do cliente | 159 KB, 75 KB com gzip |
 
-O PUT faz duas consultas ao D1 (SELECT e UPDATE), e o primário fica no leste dos EUA. A latência sai quase toda dessas idas e voltas. O Smart Placement deve aproximar o Worker do D1 depois de analisar o tráfego. Como o save roda em segundo plano, o jogador não sente essa latência. O p99 de CPU vem da primeira requisição de cada isolate, quando o WASM compila.
+Essas medições são de antes de fixar a região do Worker, quando ele rodava em São Paulo e cada PUT cruzava o continente duas vezes, uma por consulta ao D1. Com o Worker em Ashburn (`cf-placement: remote-IAD`), o Worker gasta 37 ms (p50) para validar e fazer as duas consultas. O PUT medido do Brasil continua perto de 300 ms (p50 de 348 ms em 6 amostras), porque a maior parte é a rede entre o Brasil e os EUA. Nem o D1 nem os Durable Objects rodam na América do Sul. Como o save roda em segundo plano, o jogador não sente essa latência. O p99 de CPU vem da primeira requisição de cada isolate, quando o WASM compila.
 
 ## Custo
 
@@ -107,4 +128,8 @@ Qualquer pessoa pode criar saves em massa e esgotar a cota diária de gravaçõe
 
 A folga de 10 s por save permite que quem envia um PUT a cada 5 s ganhe até 3× a produção.
 
-O bug do protótipo em que prédios ocultos aparecem como caixas vazias foi mantido, por paridade visual: `.item{display:flex}` anula o atributo `hidden`.
+## Diferenças em relação ao protótipo
+
+Os prédios ainda não revelados não aparecem mais como caixas vazias na loja. No protótipo, o `.item{display:flex}` anulava o atributo `hidden`.
+
+O pão evolui com a produção: a aura começa em 100/s, o brilho em 10 mil/s, a borda dourada em 1 milhão/s e os raios em 1 bilhão/s. Ícones dos prédios comprados giram em volta dele. Uma vitrine abaixo mostra cada prédio com a quantidade, e cada compra voa da loja até o pão. As animações contínuas respeitam `prefers-reduced-motion`.
