@@ -82,9 +82,12 @@ button{font:inherit;color:inherit}
 .seg button{border:0;background:none;padding:4px 10px;cursor:pointer;font-weight:600;font-size:.85rem;color:var(--muted)}
 .seg button[aria-pressed="true"]{background:var(--azul);color:var(--on-azul)}
 .seg button:focus-visible{outline:2px solid var(--azul);outline-offset:-2px}
-.stats{font-size:.85rem;color:var(--muted);line-height:1.6;border-top:2px solid var(--line);padding-top:14px}
+.stats{font-size:.85rem;color:var(--muted);line-height:1.6;border-top:2px solid var(--line);padding-top:14px;margin-bottom:24px}
 .stats p{margin:0}
-.reset{margin-top:12px;background:none;border:2px solid var(--line);border-radius:10px;padding:6px 12px;cursor:pointer;font-size:.85rem;color:var(--muted)}
+.save-status{min-height:1.6em;margin:0 0 10px;font-size:.85rem;color:var(--muted)}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.btn{background:none;border:2px solid var(--line);border-radius:10px;padding:6px 12px;cursor:pointer;font-size:.85rem;color:var(--muted)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
 .reset.armed{border-color:#C0392B;color:#C0392B}
 
 .toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--azul);color:var(--on-azul);padding:10px 16px;border-radius:12px;font-weight:600;max-width:min(92vw,440px);text-align:center;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:10}
@@ -159,7 +162,13 @@ button{font:inherit;color:inherit}
     <div class="stats">
       <p id="statTotal"></p>
       <p id="statClicks"></p>
-      <button class="reset" id="reset">Recomeçar do zero</button>
+    </div>
+
+    <h2>Ajustes</h2>
+    <p class="save-status" id="saveStatus" aria-live="polite"></p>
+    <div class="actions">
+      <button class="btn" id="saveNow">Salvar agora</button>
+      <button class="btn reset" id="reset">Recomeçar do zero</button>
     </div>
   </aside>
 </div>
@@ -205,6 +214,7 @@ let bootV = null, lastMirrored = null;
 // JSONs enviados recentemente (normalizado -> original), para reconhecer o próprio PUT num 409.
 const sent = new Map();
 let outage = false, failures = 0, syncing = false, schemaWarned = false;
+let savedText = '', ackAt = 0, saving = false;
 
 // Espelho local: o jogo continua e não perde progresso com a API fora do ar.
 // v: versão do servidor em que este estado se baseia. Uma aba parada não reescreve o espelho.
@@ -242,6 +252,7 @@ async function pushSave(keepalive){
     if(res.status === 200){
       const b = await res.json();
       failures = 0; outage = false;
+      ackAt = Date.now(); savedText = 'Salvo às ' + new Date(ackAt).toLocaleTimeString('pt-BR');
       if(b.clamped) adopt(b.state, b.version); else { version = b.version; acked = json; }
       return 'ok';
     }
@@ -306,6 +317,21 @@ async function importMirror(){
   if(version === 0) version = null;
 }
 function saveTick(keepalive){ mirror(); pushSave(keepalive); }
+
+// Salvar agora: mesmo pushSave; espera PUT em voo e a janela de 5 s do servidor.
+async function saveNow(){
+  for(let i = 0; i < 4; i++){
+    mirror();
+    if(inflight){ await sleep(100); i--; continue; }
+    if(version === null) return false;
+    if(client.to_json() === acked){ if(!savedText) savedText = 'Salvo às ' + new Date().toLocaleTimeString('pt-BR'); return true; }
+    const r = await pushSave(false);
+    if(r === 'ok') return true;
+    if(r === 'limited') await sleep(ackAt ? Math.max(0, ackAt + 5000 - Date.now()) + 250 : 5250);
+    else if(r !== 'conflict' && r !== 'skip') return false;
+  }
+  return false;
+}
 
 // DOM
 const $ = id => document.getElementById(id);
@@ -479,6 +505,15 @@ function removeCafe(){
   nextCafe = performance.now() + (60 + Math.random()*90)*1000;
 }
 
+// Salvar agora
+const saveBtn = $('saveNow');
+saveBtn.addEventListener('click', async () => {
+  saveBtn.disabled = true; saving = true;
+  const ok = await saveNow();
+  saving = false; saveBtn.disabled = false;
+  toast(ok ? 'Progresso salvo.' : 'Não foi possível salvar agora. O progresso fica salvo neste aparelho.');
+});
+
 // Reset
 const resetBtn = $('reset'); let resetTimer;
 resetBtn.addEventListener('click', async () => {
@@ -503,7 +538,7 @@ resetBtn.addEventListener('click', async () => {
 });
 
 // Render principal
-const bankEl=$('bank'), unitEl=$('unit'), ppsEl=$('pps'), buffsEl=$('buffs'), statTotal=$('statTotal'), statClicks=$('statClicks');
+const bankEl=$('bank'), unitEl=$('unit'), ppsEl=$('pps'), buffsEl=$('buffs'), statTotal=$('statTotal'), statClicks=$('statClicks'), saveStatus=$('saveStatus');
 let lastTitle = 0;
 function buffText(now){
   const f = client.buffs(), parts = [];
@@ -520,6 +555,7 @@ function render(now){
   setText(buffsEl, buffText(now));
   setText(statTotal, `Pães feitos no total: ${fmt(Math.floor(client.total()))}`);
   setText(statClicks, `Cliques no pão: ${fmt(client.clicks())}`);
+  setText(saveStatus, saving ? 'Salvando...' : outage ? 'Sem conexão: salvo só neste aparelho' : savedText);
   renderUpgrades();
   renderBuildings();
   if(now - lastTitle > 1000){ document.title = `${fmt(b)} pães · Pão de Queijo Clicker`; lastTitle = now; }
