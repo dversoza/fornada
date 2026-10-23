@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pão de Queijo Clicker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Rubik:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --wall:#F4F7FD; --azul:#1E4FA3; --panel:#FFFFFF; --ink:#18223F; --muted:#56607E;
+  --line:#D5DDEE; --plus:#9A5A1E; --on-azul:#FFFFFF;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --wall:#0E1730; --azul:#86A9F2; --panel:#141F3D; --ink:#EDF1FF; --muted:#A2ADCC;
+    --line:#26355F; --plus:#F2C86A; --on-azul:#0E1730; color-scheme:dark;
+  }
+  :root:not([data-theme="light"]) body{background-image:var(--tile-d)}
+}
+:root[data-theme="dark"]{
+  --wall:#0E1730; --azul:#86A9F2; --panel:#141F3D; --ink:#EDF1FF; --muted:#A2ADCC;
+  --line:#26355F; --plus:#F2C86A; --on-azul:#0E1730; color-scheme:dark;
+}
+:root[data-theme="dark"] body{background-image:var(--tile-d)}
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0}
+html{background:var(--wall);scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  background-color:var(--wall); background-image:var(--tile-l);
+  font-family:'Rubik',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  color:var(--ink); -webkit-tap-highlight-color:transparent;
+}
+button{font:inherit;color:inherit}
+.app{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);height:100%}
+
+/* Palco */
+.stage{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px 16px;overflow:hidden;text-align:center}
+.brand{font-family:'Bagel Fat One','Arial Rounded MT Bold',system-ui,sans-serif;font-weight:400;font-size:1.2rem;color:var(--azul);margin:0}
+.bank{font-family:'Bagel Fat One','Arial Rounded MT Bold',system-ui,sans-serif;font-size:clamp(2.4rem,6vw,4rem);line-height:1;margin:4px 0 0;font-variant-numeric:tabular-nums}
+.unit{color:var(--muted);margin:0}
+.pps{margin:0;font-weight:600}
+.buffs{min-height:1.3em;margin:0;font-size:.9rem;color:var(--plus);font-weight:600}
+.pao{appearance:none;border:0;background:none;padding:0;cursor:pointer;width:clamp(200px,32vw,340px);aspect-ratio:1;border-radius:50%;touch-action:manipulation;transition:transform .08s ease-out;margin-top:8px}
+.pao:active{transform:scale(.94)}
+.pao:focus-visible{outline:3px solid var(--azul);outline-offset:6px}
+.pao svg{width:100%;height:100%;display:block}
+.pao.pop svg{animation:pop .22s ease-out}
+@keyframes pop{40%{transform:scale(1.06)}}
+.float{position:absolute;pointer-events:none;font-family:'Bagel Fat One','Arial Rounded MT Bold',system-ui,sans-serif;font-size:1.4rem;color:var(--plus);transform:translate(-50%,-50%);animation:rise .9s ease-out forwards;z-index:2;white-space:nowrap}
+@keyframes rise{to{transform:translate(-50%,-160%);opacity:0}}
+.cafe{position:absolute;z-index:3;font-size:2.6rem;line-height:1;background:var(--panel);border:3px solid var(--azul);border-radius:50%;width:64px;height:64px;cursor:pointer;transform:translate(-50%,-50%);animation:bob 1.4s ease-in-out infinite;touch-action:manipulation}
+.cafe:focus-visible{outline:3px solid var(--plus);outline-offset:4px}
+@keyframes bob{50%{transform:translate(-50%,-62%) rotate(6deg)}}
+
+/* Loja */
+.store{background:var(--panel);border-left:4px solid var(--azul);overflow-y:auto;padding:20px 16px 32px;-webkit-overflow-scrolling:touch}
+.store h2{font-size:1rem;font-weight:600;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.list{display:flex;flex-direction:column;gap:8px;margin-bottom:24px}
+.item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--wall);border:2px solid var(--line);border-radius:14px;padding:10px 12px;cursor:pointer;transition:border-color .12s}
+.item:hover:not(.poor){border-color:var(--azul)}
+.item:focus-visible{outline:3px solid var(--azul);outline-offset:2px}
+.item.poor{opacity:.5;cursor:not-allowed}
+.item.shake{animation:shake .25s}
+@keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.ico{font-size:1.8rem;width:2.2rem;text-align:center;flex:none}
+.info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.nm{font-weight:600}
+.ds{font-size:.85rem;color:var(--muted)}
+.meta{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.85rem;color:var(--muted);margin-top:2px}
+.cost{font-weight:600;color:var(--ink);display:inline-flex;align-items:center;gap:5px}
+.cost::before{content:"";width:.75em;height:.75em;border-radius:50%;background:radial-gradient(circle at 35% 35%,#FCE3A0,#E9B649 60%,#B9772A)}
+.own{font-family:'Bagel Fat One','Arial Rounded MT Bold',system-ui,sans-serif;font-size:1.8rem;color:var(--azul);min-width:2ch;text-align:right;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);font-size:.9rem;margin:0}
+.seg{display:inline-flex;border:2px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:none;padding:4px 10px;cursor:pointer;font-weight:600;font-size:.85rem;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--azul);color:var(--on-azul)}
+.seg button:focus-visible{outline:2px solid var(--azul);outline-offset:-2px}
+.stats{font-size:.85rem;color:var(--muted);line-height:1.6;border-top:2px solid var(--line);padding-top:14px}
+.stats p{margin:0}
+.reset{margin-top:12px;background:none;border:2px solid var(--line);border-radius:10px;padding:6px 12px;cursor:pointer;font-size:.85rem;color:var(--muted)}
+.reset.armed{border-color:#C0392B;color:#C0392B}
+
+.toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--azul);color:var(--on-azul);padding:10px 16px;border-radius:12px;font-weight:600;max-width:min(92vw,440px);text-align:center;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:10}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:760px){
+  .app{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+  .stage{padding:10px 16px 12px;gap:4px}
+  .brand{font-size:1rem}
+  .bank{font-size:2.2rem}
+  .pao{width:min(46vw,28svh);margin-top:4px}
+  .store{border-left:0;border-top:4px solid var(--azul);padding-top:16px}
+}
+@media (prefers-reduced-motion:reduce){
+  .float{animation:fade .9s forwards}
+  @keyframes fade{to{opacity:0}}
+  .cafe,.pao.pop svg,.item.shake{animation:none}
+  .pao{transition:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="stage" id="stage">
+    <h1 class="brand">Pão de Queijo Clicker</h1>
+    <p class="bank" id="bank">0</p>
+    <p class="unit" id="unit">pães de queijo</p>
+    <p class="pps" id="pps">0 por segundo</p>
+    <p class="buffs" id="buffs" aria-live="polite"></p>
+    <button class="pao" id="pao" aria-label="Fazer um pão de queijo">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <defs>
+          <radialGradient id="dough" cx="40%" cy="34%" r="72%">
+            <stop offset="0" stop-color="#FDE7AE"/>
+            <stop offset=".5" stop-color="#EDBB52"/>
+            <stop offset="1" stop-color="#B26E25"/>
+          </radialGradient>
+          <filter id="rough" x="-10%" y="-10%" width="120%" height="120%">
+            <feTurbulence type="fractalNoise" baseFrequency=".03" numOctaves="2" seed="9"/>
+            <feDisplacementMap in="SourceGraphic" scale="12"/>
+          </filter>
+        </defs>
+        <ellipse cx="100" cy="182" rx="66" ry="9" fill="rgba(0,0,0,.18)"/>
+        <g filter="url(#rough)">
+          <ellipse cx="100" cy="100" rx="80" ry="76" fill="url(#dough)"/>
+          <path d="M58 70 q18 -10 34 2 q12 9 28 -2" fill="none" stroke="#A8641F" stroke-width="3" stroke-linecap="round" opacity=".55"/>
+          <path d="M70 128 q20 10 40 0" fill="none" stroke="#A8641F" stroke-width="3" stroke-linecap="round" opacity=".45"/>
+          <path d="M128 92 q10 14 4 30" fill="none" stroke="#A8641F" stroke-width="3" stroke-linecap="round" opacity=".45"/>
+        </g>
+        <g fill="#FFF3CC" opacity=".75">
+          <ellipse cx="74" cy="92" rx="9" ry="5"/>
+          <ellipse cx="112" cy="70" rx="6" ry="4"/>
+          <ellipse cx="96" cy="112" rx="7" ry="4"/>
+          <ellipse cx="138" cy="120" rx="5" ry="3"/>
+          <ellipse cx="60" cy="118" rx="4" ry="3"/>
+        </g>
+      </svg>
+    </button>
+  </main>
+
+  <aside class="store" aria-label="Loja">
+    <h2>Melhorias</h2>
+    <div class="list" id="ups"></div>
+
+    <h2>Produção
+      <span class="seg" role="group" aria-label="Quantidade por compra">
+        <button data-n="1">×1</button><button data-n="10">×10</button><button data-n="100">×100</button>
+      </span>
+    </h2>
+    <div class="list" id="blds"></div>
+
+    <div class="stats">
+      <p id="statTotal"></p>
+      <p id="statClicks"></p>
+      <button class="reset" id="reset">Recomeçar do zero</button>
+    </div>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  // Fundo de azulejo
+  const tile = c => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='88' height='88' viewBox='0 0 88 88'><g fill='none' stroke='${c}' stroke-width='2'><rect x='1' y='1' width='86' height='86'/><path d='M44 14C52 28 60 36 74 44C60 52 52 60 44 74C36 60 28 52 14 44C28 36 36 28 44 14Z'/><circle cx='44' cy='44' r='7'/><path d='M0 18Q14 14 18 0M88 18Q74 14 70 0M0 70Q14 74 18 88M88 70Q74 74 70 88'/></g></svg>`)}")`;
+  document.documentElement.style.setProperty('--tile-l', tile('rgba(30,79,163,.13)'));
+  document.documentElement.style.setProperty('--tile-d', tile('rgba(134,169,242,.08)'));
+
+  const SAVE_KEY = 'pdq-clicker-v1';
+
+  const B = [
+    {id:'vovo', icon:'👵', name:'Vovó mineira', desc:'Enrola pãezinhos enquanto conta causo.', base:15, rate:.1,
+      ups:['Avental florido','Rádio na cozinha','Neta ajudante']},
+    {id:'forno', icon:'🔥', name:'Forno a lenha', desc:'Uma fornada atrás da outra.', base:100, rate:1,
+      ups:['Lenha de eucalipto','Tijolo refratário','Forno de barro duplo']},
+    {id:'padaria', icon:'🏪', name:'Padaria da esquina', desc:'Pão quentinho de hora em hora.', base:1100, rate:8,
+      ups:['Balcão de vidro','Fila na porta','Vitrine aquecida']},
+    {id:'queijaria', icon:'🧀', name:'Queijaria na Canastra', desc:'Queijo bom faz pão bom.', base:12000, rate:47,
+      ups:['Leite da manhã','Cura de 30 dias','Selo de origem']},
+    {id:'fabrica', icon:'🏭', name:'Fábrica de polvilho', desc:'Polvilho em escala industrial.', base:130000, rate:260,
+      ups:['Esteira automática','Turno da noite','Polvilho premium']},
+    {id:'trem', icon:'🚂', name:'Trem Minas–São Paulo', desc:'Leva pão de queijo pra todo canto.', base:1.4e6, rate:1400,
+      ups:['Vagão refrigerado','Linha expressa','Maria-fumaça turbinada']},
+    {id:'exporta', icon:'🌎', name:'Exportação', desc:'O mundo descobriu o pão de queijo.', base:2e7, rate:7800,
+      ups:['Selo de qualidade','Contêiner climatizado','Embaixada do pão de queijo']},
+    {id:'lua', icon:'🌙', name:'Padaria na Lua', desc:'Sem gravidade, a massa cresce mais.', base:3.3e8, rate:44000,
+      ups:['Forno em gravidade zero','Queijo lunar','Base no lado escuro']},
+  ];
+  const TIERS = [{need:1, mult:10},{need:10, mult:50},{need:25, mult:500}];
+
+  const UPGRADES = [
+    {id:'c1', icon:'🥄', name:'Polvilho azedo', desc:'Cliques valem o dobro.', cost:100, kind:'click', unlock:s=>s.total>=50},
+    {id:'c2', icon:'🧈', name:'Queijo meia-cura', desc:'Cliques valem o dobro.', cost:500, kind:'click', unlock:s=>s.total>=300},
+    {id:'c3', icon:'🥚', name:'Ovo caipira', desc:'Cliques valem o dobro.', cost:10000, kind:'click', unlock:s=>s.total>=5000},
+    {id:'p1', icon:'🤲', name:'Mão de vó', desc:'Cada clique rende +1% da produção por segundo.', cost:50000, kind:'pct', unlock:s=>s.total>=20000},
+    {id:'p2', icon:'🪵', name:'Rolo de massa de família', desc:'Cada clique rende +1% da produção por segundo.', cost:5e6, kind:'pct', unlock:s=>s.total>=1e6},
+    {id:'p3', icon:'📜', name:'Receita secreta da bisa', desc:'Cada clique rende +1% da produção por segundo.', cost:5e8, kind:'pct', unlock:s=>s.total>=1e8},
+  ];
+  B.forEach(b => b.ups.forEach((nm,i) => UPGRADES.push({
+    id:`${b.id}-${i}`, icon:b.icon, name:nm, desc:`${b.name}: produção ×2.`,
+    cost:b.base*TIERS[i].mult, kind:'bld', target:b.id,
+    unlock:s => (s.owned[b.id]||0) >= TIERS[i].need
+  })));
+
+  const state = {bank:0, total:0, clicks:0, owned:{}, ups:[], buy:1};
+  let buffs = []; // {kind:'prod'|'click', mult, until}
+
+  // Números
+  const BIG = [[1e21,'sextilhão','sextilhões'],[1e18,'quintilhão','quintilhões'],[1e15,'quatrilhão','quatrilhões'],
+               [1e12,'trilhão','trilhões'],[1e9,'bilhão','bilhões'],[1e6,'milhão','milhões']];
+  function fmt(n, dec=0){
+    if(!isFinite(n)) return '∞';
+    if(n >= 1e24) return n.toExponential(2).replace('.',',');
+    for(const [v,s,p] of BIG){
+      if(n >= v){
+        const x = n/v;
+        return x.toLocaleString('pt-BR',{minimumFractionDigits:x<100?2:0, maximumFractionDigits:x<100?2:0}) + ' ' + (x<2?s:p);
+      }
+    }
+    return n.toLocaleString('pt-BR',{maximumFractionDigits: n<1000 ? dec : 0});
+  }
+
+  // Cálculos
+  const has = id => state.ups.includes(id);
+  function bMult(id){ let m=1; for(const u of UPGRADES) if(u.target===id && has(u.id)) m*=2; return m; }
+  function basePps(){ return B.reduce((s,b)=> s + (state.owned[b.id]||0)*b.rate*bMult(b.id), 0); }
+  function buffMult(kind){ return buffs.filter(x=>x.kind===kind).reduce((m,x)=>m*x.mult,1); }
+  function pps(){ return basePps()*buffMult('prod'); }
+  function clickValue(){
+    let cm=1, pct=0;
+    for(const u of UPGRADES){ if(!has(u.id)) continue; if(u.kind==='click') cm*=2; if(u.kind==='pct') pct+=.01; }
+    return (cm + basePps()*pct) * buffMult('prod') * buffMult('click');
+  }
+  function costFor(b, n){
+    const own = state.owned[b.id]||0;
+    return Math.ceil(b.base * Math.pow(1.15, own) * (Math.pow(1.15, n) - 1) / .15);
+  }
+  function gain(v){ state.bank += v; state.total += v; }
+
+  // Salvar
+  function save(){
+    try{ localStorage.setItem(SAVE_KEY, JSON.stringify({...state, t:Date.now()})); }catch(e){}
+  }
+  function load(){
+    try{
+      const raw = localStorage.getItem(SAVE_KEY);
+      if(!raw) return null;
+      const d = JSON.parse(raw);
+      state.bank = +d.bank||0; state.total = +d.total||0; state.clicks = +d.clicks||0;
+      state.owned = d.owned && typeof d.owned==='object' ? d.owned : {};
+      state.ups = Array.isArray(d.ups) ? d.ups : [];
+      state.buy = [1,10,100].includes(d.buy) ? d.buy : 1;
+      return +d.t || null;
+    }catch(e){ return null; }
+  }
+
+  // DOM
+  const $ = id => document.getElementById(id);
+  const stage=$('stage'), pao=$('pao'), upsEl=$('ups'), bldsEl=$('blds'), toastEl=$('toast');
+  function setText(el, t){ if(el._t !== t){ el.textContent = t; el._t = t; } }
+
+  let toastTimer;
+  function toast(msg){
+    toastEl.textContent = msg; toastEl.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastEl.classList.remove('show'), 4200);
+  }
+  function shake(el){ el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); }
+
+  // Clique no pão
+  let floats = 0;
+  pao.addEventListener('click', e => {
+    const v = clickValue();
+    gain(v); state.clicks++;
+    pao.classList.remove('pop'); void pao.offsetWidth; pao.classList.add('pop');
+    if(floats > 40) return;
+    const r = stage.getBoundingClientRect();
+    let x = e.clientX, y = e.clientY;
+    if(!e.detail || (!x && !y)){ const p = pao.getBoundingClientRect(); x = p.left+p.width/2; y = p.top+p.height/3; }
+    const f = document.createElement('span');
+    f.className = 'float';
+    f.textContent = '+' + fmt(v, v<10?1:0);
+    f.style.left = (x - r.left + (Math.random()*20-10)) + 'px';
+    f.style.top = (y - r.top) + 'px';
+    floats++;
+    f.addEventListener('animationend', ()=>{ f.remove(); floats--; });
+    stage.appendChild(f);
+  });
+
+  // Prédios
+  B.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'item';
+    btn.innerHTML = `<span class="ico" aria-hidden="true"></span><span class="info"><span class="nm"></span><span class="ds"></span><span class="meta"><span class="cost"></span><span class="rate"></span></span></span><span class="own"></span>`;
+    b._el = btn; b._ico = btn.querySelector('.ico'); b._nm = btn.querySelector('.nm'); b._ds = btn.querySelector('.ds');
+    b._cost = btn.querySelector('.cost'); b._rate = btn.querySelector('.rate'); b._own = btn.querySelector('.own');
+    btn.addEventListener('click', () => {
+      const c = costFor(b, state.buy);
+      if(btn.classList.contains('locked') || state.bank < c){ shake(btn); return; }
+      state.bank -= c;
+      state.owned[b.id] = (state.owned[b.id]||0) + state.buy;
+      save();
+    });
+    bldsEl.appendChild(btn);
+  });
+
+  function renderBuildings(){
+    let lockedShown = false;
+    for(const b of B){
+      const own = state.owned[b.id]||0;
+      const revealed = own>0 || state.total >= b.base*.4;
+      let visible = revealed, locked = false;
+      if(!revealed && !lockedShown){ visible = true; locked = true; lockedShown = true; }
+      b._el.hidden = !visible;
+      if(!visible) continue;
+      b._el.classList.toggle('locked', locked);
+      setText(b._ico, locked ? '❔' : b.icon);
+      setText(b._nm, locked ? '???' : b.name);
+      setText(b._ds, locked ? 'Faça mais pães para descobrir.' : b.desc);
+      const c = costFor(b, state.buy);
+      setText(b._cost, fmt(c));
+      setText(b._rate, locked ? '' : `${fmt(b.rate*bMult(b.id),1)}/s cada`);
+      setText(b._own, own ? fmt(own) : '');
+      const poor = locked || state.bank < c;
+      b._el.classList.toggle('poor', poor);
+      b._el.setAttribute('aria-disabled', poor);
+      b._el.setAttribute('aria-label', locked ? `Produção ainda não descoberta, custa ${fmt(c)}` : `${b.name}, tem ${own}, comprar ${state.buy} por ${fmt(c)}`);
+    }
+  }
+
+  // Melhorias
+  let upKey = null, upItems = [];
+  function renderUpgrades(){
+    const avail = UPGRADES.filter(u => !has(u.id) && u.unlock(state)).sort((a,b)=>a.cost-b.cost);
+    const key = avail.map(u=>u.id).join();
+    if(key !== upKey){
+      upKey = key; upsEl.innerHTML = ''; upItems = [];
+      if(!avail.length){
+        const p = document.createElement('p'); p.className='empty';
+        p.textContent = 'Continue fazendo pães para liberar melhorias.';
+        upsEl.appendChild(p);
+      }
+      for(const u of avail){
+        const btn = document.createElement('button');
+        btn.className = 'item';
+        btn.innerHTML = `<span class="ico" aria-hidden="true">${u.icon}</span><span class="info"><span class="nm"></span><span class="ds"></span><span class="meta"><span class="cost"></span></span></span>`;
+        btn.querySelector('.nm').textContent = u.name;
+        btn.querySelector('.ds').textContent = u.desc;
+        btn.querySelector('.cost').textContent = fmt(u.cost);
+        btn.addEventListener('click', () => {
+          if(state.bank < u.cost){ shake(btn); return; }
+          state.bank -= u.cost; state.ups.push(u.id); upKey = null;
+          toast(`Comprado: ${u.name}`);
+          save();
+        });
+        upsEl.appendChild(btn);
+        upItems.push([u, btn]);
+      }
+    }
+    for(const [u, btn] of upItems){
+      const poor = state.bank < u.cost;
+      btn.classList.toggle('poor', poor);
+      btn.setAttribute('aria-disabled', poor);
+    }
+  }
+
+  // Quantidade por compra
+  const segBtns = document.querySelectorAll('.seg button');
+  function renderSeg(){ segBtns.forEach(b => b.setAttribute('aria-pressed', +b.dataset.n === state.buy)); }
+  segBtns.forEach(b => b.addEventListener('click', () => { state.buy = +b.dataset.n; renderSeg(); save(); }));
+
+  // Cafezinho bônus
+  let cafeEl = null, cafeUntil = 0, nextCafe = performance.now() + (30 + Math.random()*30)*1000;
+  function spawnCafe(now){
+    cafeEl = document.createElement('button');
+    cafeEl.className = 'cafe';
+    cafeEl.textContent = '☕';
+    cafeEl.setAttribute('aria-label', 'Cafezinho: toque para ganhar um bônus');
+    cafeEl.style.left = (12 + Math.random()*76) + '%';
+    cafeEl.style.top = (18 + Math.random()*68) + '%';
+    cafeEl.addEventListener('click', () => {
+      const r = Math.random(), t = performance.now();
+      if(r < .1){
+        buffs.push({kind:'click', mult:77, until:t+13000});
+        toast('Café extraforte! Cliques ×77 por 13 segundos.');
+      } else if(r < .55){
+        buffs.push({kind:'prod', mult:7, until:t+30000});
+        toast('Cafezinho passado na hora! Produção ×7 por 30 segundos.');
+      } else {
+        const v = Math.min(state.bank*.15, basePps()*900) + 13;
+        gain(v);
+        toast(`Café com prosa: +${fmt(v)} pães de queijo.`);
+      }
+      removeCafe(); save();
+    });
+    stage.appendChild(cafeEl);
+    cafeUntil = now + 13000;
+  }
+  function removeCafe(){
+    if(cafeEl){ cafeEl.remove(); cafeEl = null; }
+    nextCafe = performance.now() + (60 + Math.random()*90)*1000;
+  }
+
+  // Reset
+  const resetBtn = $('reset'); let resetTimer;
+  resetBtn.addEventListener('click', () => {
+    if(!resetBtn.classList.contains('armed')){
+      resetBtn.classList.add('armed'); resetBtn.textContent = 'Toque de novo para apagar tudo';
+      resetTimer = setTimeout(()=>{ resetBtn.classList.remove('armed'); resetBtn.textContent = 'Recomeçar do zero'; }, 3000);
+      return;
+    }
+    clearTimeout(resetTimer);
+    Object.assign(state, {bank:0, total:0, clicks:0, owned:{}, ups:[], buy:1});
+    buffs = []; upKey = null; renderSeg();
+    resetBtn.classList.remove('armed'); resetBtn.textContent = 'Recomeçar do zero';
+    try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
+    toast('Tudo apagado. A massa está pronta de novo.');
+  });
+
+  // Render principal
+  const bankEl=$('bank'), unitEl=$('unit'), ppsEl=$('pps'), buffsEl=$('buffs'), statTotal=$('statTotal'), statClicks=$('statClicks');
+  let lastTitle = 0;
+  function render(now){
+    const b = Math.floor(state.bank);
+    setText(bankEl, fmt(b));
+    setText(unitEl, b === 1 ? 'pão de queijo' : 'pães de queijo');
+    setText(ppsEl, `${fmt(pps(),1)} por segundo`);
+    const bt = buffs.map(x => `${x.kind==='prod'?'Produção':'Cliques'} ×${x.mult} por mais ${Math.ceil((x.until-now)/1000)}s`).join('  ');
+    setText(buffsEl, bt);
+    setText(statTotal, `Pães feitos no total: ${fmt(Math.floor(state.total))}`);
+    setText(statClicks, `Cliques no pão: ${fmt(state.clicks)}`);
+    renderUpgrades();
+    renderBuildings();
+    if(now - lastTitle > 1000){ document.title = `${fmt(b)} pães · Pão de Queijo Clicker`; lastTitle = now; }
+  }
+
+  // Loop
+  let last = performance.now(), lastSave = last;
+  function frame(now){
+    const dt = Math.max(0, (now - last)/1000); last = now;
+    gain(pps()*dt);
+    if(buffs.length) buffs = buffs.filter(x => x.until > now);
+    if(!cafeEl && now >= nextCafe) spawnCafe(now);
+    if(cafeEl && now >= cafeUntil) removeCafe();
+    if(now - lastSave > 5000){ save(); lastSave = now; }
+    render(now);
+    requestAnimationFrame(frame);
+  }
+
+  // Início
+  const savedAt = load();
+  renderSeg();
+  if(savedAt){
+    const away = Math.min((Date.now() - savedAt)/1000, 12*3600);
+    const earned = basePps() * away * .5;
+    if(away > 60 && earned >= 1){
+      gain(earned);
+      setTimeout(()=>toast(`Enquanto você estava fora, a turma fez ${fmt(earned)} pães de queijo.`), 400);
+    }
+  }
+  document.addEventListener('visibilitychange', () => { if(document.hidden) save(); });
+  window.addEventListener('pagehide', save);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
