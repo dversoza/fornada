@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pão de Queijo Clicker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Rubik:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --wall:#F4F7FD; --azul:#1E4FA3; --panel:#FFFFFF; --ink:#18223F; --muted:#56607E;
+  --line:#D5DDEE; --plus:#9A5A1E; --on-azul:#FFFFFF;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --wall:#0E1730; --azul:#86A9F2; --panel:#141F3D; --ink:#EDF1FF; --muted:#A2ADCC;
+    --line:#26355F; --plus:#F2C86A; --on-azul:#0E1730; color-scheme:dark;
+  }
+  :root:not([data-theme="light"]) body{background-image:var(--tile-d)}
+}
+:root[data-theme="dark"]{
+  --wall:#0E1730; --azul:#86A9F2; --panel:#141F3D; --ink:#EDF1FF; --muted:#A2ADCC;
+  --line:#26355F; --plus:#F2C86A; --on-azul:#0E1730; color-scheme:dark;
+}
+:root[data-theme="dark"] body{background-image:var(--tile-d)}
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0}
+html{background:var(--wall);scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  background-color:var(--wall); background-image:var(--tile-l);
+  font-family:'Rubik',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  color:var(--ink); -webkit-tap-highlight-color:transparent;
+}
+button{font:inherit;color:inherit}
+.app{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);height:100%}
+
+/* Palco */
+.stage{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px 16px;overflow:hidden;text-align:center}
+.brand{font-family:'Bagel Fat One','Arial Rounded MT Bold',system-ui,sans-serif;font-weight:400;font-size:1.2rem;color:var(--azul);margin:0}
+.bank{font-family:'Bagel Fat One','Arial Rounded MT Bold',system-ui,sans-serif;font-size:clamp(2.4rem,6vw,4rem);line-height:1;margin:4px 0 0;font-variant-numeric:tabular-nums}
+.unit{color:var(--muted);margin:0}
+.pps{margin:0;font-weight:600}
+.buffs{min-height:1.3em;margin:0;font-size:.9rem;color:var(--plus);font-weight:600}
+.pao{appearance:none;border:0;background:none;padding:0;cursor:pointer;width:clamp(200px,32vw,340px);aspect-ratio:1;border-radius:50%;touch-action:manipulation;transition:transform .08s ease-out;margin-top:8px}
+.pao:active{transform:scale(.94)}
+.pao:focus-visible{outline:3px solid var(--azul);outline-offset:6px}
+.pao svg{width:100%;height:100%;display:block}
+.pao.pop svg{animation:pop .22s ease-out}
+@keyframes pop{40%{transform:scale(1.06)}}
+.float{position:absolute;pointer-events:none;font-family:'Bagel Fat One','Arial Rounded MT Bold',system-ui,sans-serif;font-size:1.4rem;color:var(--plus);transform:translate(-50%,-50%);animation:rise .9s ease-out forwards;z-index:2;white-space:nowrap}
+@keyframes rise{to{transform:translate(-50%,-160%);opacity:0}}
+.cafe{position:absolute;z-index:3;font-size:2.6rem;line-height:1;background:var(--panel);border:3px solid var(--azul);border-radius:50%;width:64px;height:64px;cursor:pointer;transform:translate(-50%,-50%);animation:bob 1.4s ease-in-out infinite;touch-action:manipulation}
+.cafe:focus-visible{outline:3px solid var(--plus);outline-offset:4px}
+@keyframes bob{50%{transform:translate(-50%,-62%) rotate(6deg)}}
+
+/* Loja */
+.store{background:var(--panel);border-left:4px solid var(--azul);overflow-y:auto;padding:20px 16px 32px;-webkit-overflow-scrolling:touch}
+.store h2{font-size:1rem;font-weight:600;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.list{display:flex;flex-direction:column;gap:8px;margin-bottom:24px}
+.item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--wall);border:2px solid var(--line);border-radius:14px;padding:10px 12px;cursor:pointer;transition:border-color .12s}
+.item:hover:not(.poor){border-color:var(--azul)}
+.item:focus-visible{outline:3px solid var(--azul);outline-offset:2px}
+.item.poor{opacity:.5;cursor:not-allowed}
+.item.shake{animation:shake .25s}
+@keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.ico{font-size:1.8rem;width:2.2rem;text-align:center;flex:none}
+.info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.nm{font-weight:600}
+.ds{font-size:.85rem;color:var(--muted)}
+.meta{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.85rem;color:var(--muted);margin-top:2px}
+.cost{font-weight:600;color:var(--ink);display:inline-flex;align-items:center;gap:5px}
+.cost::before{content:"";width:.75em;height:.75em;border-radius:50%;background:radial-gradient(circle at 35% 35%,#FCE3A0,#E9B649 60%,#B9772A)}
+.own{font-family:'Bagel Fat One','Arial Rounded MT Bold',system-ui,sans-serif;font-size:1.8rem;color:var(--azul);min-width:2ch;text-align:right;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);font-size:.9rem;margin:0}
+.seg{display:inline-flex;border:2px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:none;padding:4px 10px;cursor:pointer;font-weight:600;font-size:.85rem;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--azul);color:var(--on-azul)}
+.seg button:focus-visible{outline:2px solid var(--azul);outline-offset:-2px}
+.stats{font-size:.85rem;color:var(--muted);line-height:1.6;border-top:2px solid var(--line);padding-top:14px}
+.stats p{margin:0}
+.reset{margin-top:12px;background:none;border:2px solid var(--line);border-radius:10px;padding:6px 12px;cursor:pointer;font-size:.85rem;color:var(--muted)}
+.reset.armed{border-color:#C0392B;color:#C0392B}
+
+.toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--azul);color:var(--on-azul);padding:10px 16px;border-radius:12px;font-weight:600;max-width:min(92vw,440px);text-align:center;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:10}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:760px){
+  .app{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+  .stage{padding:10px 16px 12px;gap:4px}
+  .brand{font-size:1rem}
+  .bank{font-size:2.2rem}
+  .pao{width:min(46vw,28svh);margin-top:4px}
+  .store{border-left:0;border-top:4px solid var(--azul);padding-top:16px}
+}
+@media (prefers-reduced-motion:reduce){
+  .float{animation:fade .9s forwards}
+  @keyframes fade{to{opacity:0}}
+  .cafe,.pao.pop svg,.item.shake{animation:none}
+  .pao{transition:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="stage" id="stage">
+    <h1 class="brand">Pão de Queijo Clicker</h1>
+    <p class="bank" id="bank">0</p>
+    <p class="unit" id="unit">pães de queijo</p>
+    <p class="pps" id="pps">0 por segundo</p>
+    <p class="buffs" id="buffs" aria-live="polite"></p>
+    <button class="pao" id="pao" aria-label="Fazer um pão de queijo">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <defs>
+          <radialGradient id="dough" cx="40%" cy="34%" r="72%">
+            <stop offset="0" stop-color="#FDE7AE"/>
+            <stop offset=".5" stop-color="#EDBB52"/>
+            <stop offset="1" stop-color="#B26E25"/>
+          </radialGradient>
+          <filter id="rough" x="-10%" y="-10%" width="120%" height="120%">
+            <feTurbulence type="fractalNoise" baseFrequency=".03" numOctaves="2" seed="9"/>
+            <feDisplacementMap in="SourceGraphic" scale="12"/>
+          </filter>
+        </defs>
+        <ellipse cx="100" cy="182" rx="66" ry="9" fill="rgba(0,0,0,.18)"/>
+        <g filter="url(#rough)">
+          <ellipse cx="100" cy="100" rx="80" ry="76" fill="url(#dough)"/>
+          <path d="M58 70 q18 -10 34 2 q12 9 28 -2" fill="none" stroke="#A8641F" stroke-width="3" stroke-linecap="round" opacity=".55"/>
+          <path d="M70 128 q20 10 40 0" fill="none" stroke="#A8641F" stroke-width="3" stroke-linecap="round" opacity=".45"/>
+          <path d="M128 92 q10 14 4 30" fill="none" stroke="#A8641F" stroke-width="3" stroke-linecap="round" opacity=".45"/>
+        </g>
+        <g fill="#FFF3CC" opacity=".75">
+          <ellipse cx="74" cy="92" rx="9" ry="5"/>
+          <ellipse cx="112" cy="70" rx="6" ry="4"/>
+          <ellipse cx="96" cy="112" rx="7" ry="4"/>
+          <ellipse cx="138" cy="120" rx="5" ry="3"/>
+          <ellipse cx="60" cy="118" rx="4" ry="3"/>
+        </g>
+      </svg>
+    </button>
+  </main>
+
+  <aside class="store" aria-label="Loja">
+    <h2>Melhorias</h2>
+    <div class="list" id="ups"></div>
+
+    <h2>Produção
+      <span class="seg" role="group" aria-label="Quantidade por compra">
+        <button data-n="1">×1</button><button data-n="10">×10</button><button data-n="100">×100</button>
+      </span>
+    </h2>
+    <div class="list" id="blds"></div>
+
+    <div class="stats">
+      <p id="statTotal"></p>
+      <p id="statClicks"></p>
+      <button class="reset" id="reset">Recomeçar do zero</button>
+    </div>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+import init, { Client, catalog_json } from '__GLUE__';
+
+// Fundo de azulejo
+const tile = c => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='88' height='88' viewBox='0 0 88 88'><g fill='none' stroke='${c}' stroke-width='2'><rect x='1' y='1' width='86' height='86'/><path d='M44 14C52 28 60 36 74 44C60 52 52 60 44 74C36 60 28 52 14 44C28 36 36 28 44 14Z'/><circle cx='44' cy='44' r='7'/><path d='M0 18Q14 14 18 0M88 18Q74 14 70 0M0 70Q14 74 18 88M88 70Q74 74 70 88'/></g></svg>`)}")`;
+document.documentElement.style.setProperty('--tile-l', tile('rgba(30,79,163,.13)'));
+document.documentElement.style.setProperty('--tile-d', tile('rgba(134,169,242,.08)'));
+
+const SAVE_KEY = 'pdq-clicker-v1';
+
+// Números
+const BIG = [[1e21,'sextilhão','sextilhões'],[1e18,'quintilhão','quintilhões'],[1e15,'quatrilhão','quatrilhões'],
+             [1e12,'trilhão','trilhões'],[1e9,'bilhão','bilhões'],[1e6,'milhão','milhões']];
+const nfCache = {};
+function nf(minDec, maxDec){
+  const k = minDec + ',' + maxDec;
+  return nfCache[k] ??= new Intl.NumberFormat('pt-BR', {minimumFractionDigits:minDec, maximumFractionDigits:maxDec});
+}
+function fmt(n, dec=0){
+  if(!isFinite(n)) return '∞';
+  if(n >= 1e24) return n.toExponential(2).replace('.',',');
+  for(const [v,s,p] of BIG){
+    if(n >= v){
+      const x = n/v;
+      return nf(x<100?2:0, x<100?2:0).format(x) + ' ' + (x<2?s:p);
+    }
+  }
+  return nf(0, n<1000 ? dec : 0).format(n);
+}
+
+// Salvar
+function save(){
+  try{ localStorage.setItem(SAVE_KEY, JSON.stringify({...JSON.parse(client.to_json()), t:Date.now()})); }catch(e){}
+}
+function load(){
+  let raw = null;
+  try{
+    raw = localStorage.getItem(SAVE_KEY);
+    if(!raw) return null;
+    client.load(raw);
+    return +JSON.parse(raw).t || null;
+  }catch(e){
+    if(raw) try{ localStorage.setItem(SAVE_KEY + '.bak', raw); }catch(_){}
+    return null;
+  }
+}
+
+// DOM
+const $ = id => document.getElementById(id);
+const stage=$('stage'), pao=$('pao'), upsEl=$('ups'), bldsEl=$('blds'), toastEl=$('toast');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+function setText(el, t){ if(el._t !== t){ el.textContent = t; el._t = t; } }
+function setAttr(el, name, v){ v = String(v); if(el._a?.[name] !== v){ el.setAttribute(name, v); (el._a ??= {})[name] = v; } }
+function setClass(el, name, on){ if(el._c?.[name] !== on){ el.classList.toggle(name, on); (el._c ??= {})[name] = on; } }
+function setHidden(el, h){ if(el._h !== h){ el.hidden = h; el._h = h; } }
+
+let toastTimer;
+function toast(msg){
+  toastEl.textContent = msg; toastEl.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastEl.classList.remove('show'), 4200);
+}
+try{ await init({ module_or_path: '__WASM__' }); }
+catch(e){ console.error(e); toast('Não foi possível carregar o jogo. Recarregue a página.'); throw e; }
+const client = new Client();
+const { buildings: B, upgrades: UPGRADES } = JSON.parse(catalog_json());
+
+// Mirrors the CSS keyframes pop and shake; each key carries its own easing like animation-timing-function.
+function shake(el){
+  if(reduceMotion.matches) return;
+  el.animate([
+    {transform:'translateX(0)', easing:'ease'},
+    {transform:'translateX(-4px)', offset:.25, easing:'ease'},
+    {transform:'translateX(4px)', offset:.75, easing:'ease'},
+    {transform:'translateX(0)'},
+  ], {duration:250});
+}
+function pop(el){
+  if(reduceMotion.matches) return;
+  el.animate([
+    {transform:'scale(1)', easing:'ease-out'},
+    {transform:'scale(1.06)', offset:.4, easing:'ease-out'},
+    {transform:'scale(1)'},
+  ], {duration:220});
+}
+
+// Clique no pão
+let floats = 0;
+const floatQueue = [];
+const paoSvg = pao.querySelector('svg');
+pao.addEventListener('click', e => {
+  const v = client.click();
+  pop(paoSvg);
+  if(floats + floatQueue.length > 40) return;
+  floatQueue.push({x:e.clientX, y:e.clientY, keyboard:!e.detail || (!e.clientX && !e.clientY), text:'+' + fmt(v, v<10?1:0)});
+});
+function flushFloats(){
+  const r = stage.getBoundingClientRect();
+  const p = floatQueue.some(q => q.keyboard) ? pao.getBoundingClientRect() : null;
+  for(const q of floatQueue){
+    let {x, y} = q;
+    if(q.keyboard){ x = p.left+p.width/2; y = p.top+p.height/3; }
+    const f = document.createElement('span');
+    f.className = 'float';
+    f.textContent = q.text;
+    f.style.left = (x - r.left + (Math.random()*20-10)) + 'px';
+    f.style.top = (y - r.top) + 'px';
+    floats++;
+    f.addEventListener('animationend', ()=>{ f.remove(); floats--; });
+    stage.appendChild(f);
+  }
+  floatQueue.length = 0;
+}
+
+// Prédios
+const bItems = B.map((b, i) => {
+  const btn = document.createElement('button');
+  btn.className = 'item';
+  btn.innerHTML = `<span class="ico" aria-hidden="true"></span><span class="info"><span class="nm"></span><span class="ds"></span><span class="meta"><span class="cost"></span><span class="rate"></span></span></span><span class="own"></span>`;
+  const it = {el:btn, ico:btn.querySelector('.ico'), nm:btn.querySelector('.nm'), ds:btn.querySelector('.ds'),
+    cost:btn.querySelector('.cost'), rate:btn.querySelector('.rate'), own:btn.querySelector('.own'), locked:false};
+  btn.addEventListener('click', () => {
+    if(it.locked || !client.buy_building(i)){ shake(btn); return; }
+    save();
+  });
+  bldsEl.appendChild(btn);
+  return it;
+});
+
+function renderBuildings(){
+  let lockedShown = false;
+  B.forEach((b, i) => {
+    const it = bItems[i];
+    const revealed = client.revealed(i);
+    let visible = revealed, locked = false;
+    if(!revealed && !lockedShown){ visible = true; locked = true; lockedShown = true; }
+    setHidden(it.el, !visible);
+    if(!visible) return;
+    it.locked = locked;
+    setClass(it.el, 'locked', locked);
+    const own = client.owned(i);
+    setText(it.ico, locked ? '❔' : b.icon);
+    setText(it.nm, locked ? '???' : b.name);
+    setText(it.ds, locked ? 'Faça mais pães para descobrir.' : b.desc);
+    const c = client.cost(i);
+    setText(it.cost, fmt(c));
+    setText(it.rate, locked ? '' : `${fmt(client.building_rate(i),1)}/s cada`);
+    setText(it.own, own ? fmt(own) : '');
+    const poor = locked || client.bank() < c;
+    setClass(it.el, 'poor', poor);
+    setAttr(it.el, 'aria-disabled', poor);
+    setAttr(it.el, 'aria-label', locked ? `Produção ainda não descoberta, custa ${fmt(c)}` : `${b.name}, tem ${own}, comprar ${client.buy()} por ${fmt(c)}`);
+  });
+}
+
+// Melhorias
+let upKey = null, upItems = [];
+function renderUpgrades(){
+  const avail = client.available_upgrades();
+  const key = avail.join();
+  if(key !== upKey){
+    upKey = key; upsEl.innerHTML = ''; upItems = [];
+    if(!avail.length){
+      const p = document.createElement('p'); p.className='empty';
+      p.textContent = 'Continue fazendo pães para liberar melhorias.';
+      upsEl.appendChild(p);
+    }
+    for(const i of avail){
+      const u = UPGRADES[i];
+      const btn = document.createElement('button');
+      btn.className = 'item';
+      btn.innerHTML = `<span class="ico" aria-hidden="true">${u.icon}</span><span class="info"><span class="nm"></span><span class="ds"></span><span class="meta"><span class="cost"></span></span></span>`;
+      btn.querySelector('.nm').textContent = u.name;
+      btn.querySelector('.ds').textContent = u.desc;
+      btn.querySelector('.cost').textContent = fmt(u.cost);
+      btn.addEventListener('click', () => {
+        if(!client.buy_upgrade(i)){ shake(btn); return; }
+        upKey = null;
+        toast(`Comprado: ${u.name}`);
+        save();
+      });
+      upsEl.appendChild(btn);
+      upItems.push([u, btn]);
+    }
+  }
+  const bank = client.bank();
+  for(const [u, btn] of upItems){
+    const poor = bank < u.cost;
+    setClass(btn, 'poor', poor);
+    setAttr(btn, 'aria-disabled', poor);
+  }
+}
+
+// Quantidade por compra
+const segBtns = document.querySelectorAll('.seg button');
+function renderSeg(){ segBtns.forEach(b => setAttr(b, 'aria-pressed', +b.dataset.n === client.buy())); }
+segBtns.forEach(b => b.addEventListener('click', () => { client.set_buy(+b.dataset.n); renderSeg(); save(); }));
+
+// Cafezinho bônus
+let cafeEl = null, cafeUntil = 0, nextCafe = performance.now() + (30 + Math.random()*30)*1000;
+function spawnCafe(now){
+  cafeEl = document.createElement('button');
+  cafeEl.className = 'cafe';
+  cafeEl.textContent = '☕';
+  cafeEl.setAttribute('aria-label', 'Cafezinho: toque para ganhar um bônus');
+  cafeEl.style.left = (12 + Math.random()*76) + '%';
+  cafeEl.style.top = (18 + Math.random()*68) + '%';
+  cafeEl.addEventListener('click', () => {
+    const [kind, amount] = client.cafe(Math.random(), performance.now());
+    if(kind === 0) toast('Café extraforte! Cliques ×77 por 13 segundos.');
+    else if(kind === 1) toast('Cafezinho passado na hora! Produção ×7 por 30 segundos.');
+    else toast(`Café com prosa: +${fmt(amount)} pães de queijo.`);
+    removeCafe(); save();
+  });
+  stage.appendChild(cafeEl);
+  cafeUntil = now + 13000;
+}
+function removeCafe(){
+  if(cafeEl){ cafeEl.remove(); cafeEl = null; }
+  nextCafe = performance.now() + (60 + Math.random()*90)*1000;
+}
+
+// Reset
+const resetBtn = $('reset'); let resetTimer;
+resetBtn.addEventListener('click', () => {
+  if(!resetBtn.classList.contains('armed')){
+    resetBtn.classList.add('armed'); resetBtn.textContent = 'Toque de novo para apagar tudo';
+    resetTimer = setTimeout(()=>{ resetBtn.classList.remove('armed'); resetBtn.textContent = 'Recomeçar do zero'; }, 3000);
+    return;
+  }
+  clearTimeout(resetTimer);
+  client.reset();
+  upKey = null; renderSeg();
+  resetBtn.classList.remove('armed'); resetBtn.textContent = 'Recomeçar do zero';
+  try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
+  toast('Tudo apagado. A massa está pronta de novo.');
+});
+
+// Render principal
+const bankEl=$('bank'), unitEl=$('unit'), ppsEl=$('pps'), buffsEl=$('buffs'), statTotal=$('statTotal'), statClicks=$('statClicks');
+let lastTitle = 0;
+function buffText(now){
+  const f = client.buffs(), parts = [];
+  for(let i = 0; i < f.length; i += 3)
+    parts.push(`${f[i]===0?'Produção':'Cliques'} ×${f[i+1]} por mais ${Math.ceil((f[i+2]-now)/1000)}s`);
+  return parts.join('  ');
+}
+function render(now){
+  if(floatQueue.length) flushFloats();
+  const b = Math.floor(client.bank());
+  setText(bankEl, fmt(b));
+  setText(unitEl, b === 1 ? 'pão de queijo' : 'pães de queijo');
+  setText(ppsEl, `${fmt(client.pps(),1)} por segundo`);
+  setText(buffsEl, buffText(now));
+  setText(statTotal, `Pães feitos no total: ${fmt(Math.floor(client.total()))}`);
+  setText(statClicks, `Cliques no pão: ${fmt(client.clicks())}`);
+  renderUpgrades();
+  renderBuildings();
+  if(now - lastTitle > 1000){ document.title = `${fmt(b)} pães · Pão de Queijo Clicker`; lastTitle = now; }
+}
+
+// Loop
+let last = performance.now(), lastSave = last;
+function frame(now){
+  const dt = Math.max(0, (now - last)/1000); last = now;
+  client.tick(dt, now);
+  if(!cafeEl && now >= nextCafe) spawnCafe(now);
+  if(cafeEl && now >= cafeUntil) removeCafe();
+  if(now - lastSave > 5000){ save(); lastSave = now; }
+  render(now);
+  requestAnimationFrame(frame);
+}
+
+// Início
+const savedAt = load();
+renderSeg();
+if(savedAt){
+  const earned = client.apply_offline((Date.now() - savedAt)/1000);
+  if(earned > 0) setTimeout(()=>toast(`Enquanto você estava fora, a turma fez ${fmt(earned)} pães de queijo.`), 400);
+}
+document.addEventListener('visibilitychange', () => { if(document.hidden) save(); });
+addEventListener('pagehide', save);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

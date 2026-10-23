@@ -1,3 +1,9 @@
 [workspace]
-members = ["game-core"]
+members = ["game-core", "web"]
 resolver = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
