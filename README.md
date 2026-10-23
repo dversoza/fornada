@@ -1,0 +1,110 @@
+# Fornada
+
+Pão de Queijo Clicker reescrito em Rust e WebAssembly, hospedado na Cloudflare: https://fornada.versoza.dev
+
+O protótipo original está em `reference/pao-de-queijo-clicker.html` e a especificação da reescrita em `PROMPT.md`.
+
+## Arquitetura
+
+A simulação roda no navegador com `requestAnimationFrame`. O servidor nunca faz tick por jogador: ele só guarda e valida saves.
+
+A lógica do jogo fica no crate `game-core`, em Rust puro: catálogo, fórmulas, compras, cafezinho, ganho offline, formato de save e validação. O cliente usa o `game-core` compilado para WASM via `wasm-bindgen`. O servidor é um Worker escrito com `workers-rs`, também em WASM, então cliente e servidor executam exatamente o mesmo código.
+
+O Worker atende só `/api/*` (`run_worker_first`). O resto sai direto do Static Assets, então a página abre sem esperar o Worker. Os saves ficam no D1 (binding `DB`), com o primário no leste dos EUA: nem D1 nem Durable Objects rodam na América do Sul.
+
+```
+game-core/   lógica compartilhada e testes
+web/         wrapper wasm-bindgen e index.html (HTML/CSS do protótipo + JS fino)
+worker/      Worker da API (crate api)
+migrations/  esquema do D1
+scripts/     build do cliente, testes da API e benchmark
+tests/       testes de integração da API (node --test)
+```
+
+## Rodar local
+
+Ferramentas: rustup (a versão vem de `rust-toolchain.toml`), `wasm-bindgen-cli` na mesma versão do `Cargo.lock`, binaryen (`wasm-opt`), `worker-build` e Node 24.
+
+```bash
+brew install rustup binaryen
+cargo install wasm-bindgen-cli --version 0.2.129 --locked
+cargo install worker-build --version 0.8.7 --locked
+npm ci
+npx wrangler d1 migrations apply DB --local
+npx wrangler dev
+```
+
+O `wrangler dev` roda o comando de build do `wrangler.jsonc`: `scripts/build-web.sh` gera `dist/` com nomes de arquivo com hash, e o `worker-build` compila o Worker.
+
+Testes:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+npm test
+```
+
+`npm test` sobe o `wrangler dev` com um D1 local temporário e roda os testes de integração da API.
+
+## Deploy
+
+```bash
+npx wrangler d1 migrations apply DB --remote
+npx wrangler deploy
+```
+
+O token da Cloudflare precisa de D1 Edit, Workers Scripts Edit e, na zona versoza.dev, Workers Routes Edit. Use o wrangler: o `cf deploy` ignora o `wrangler.jsonc` deste projeto e gera uma configuração própria sem o Worker e sem o D1.
+
+## Configuração
+
+Não há segredos nem variáveis. O `wrangler.jsonc` define o domínio `fornada.versoza.dev` (`workers_dev` desligado), o binding `DB`, Smart Placement e Workers Logs. Os assets com hash recebem `Cache-Control: public, max-age=31536000, immutable` via `web/_headers`. O `index.html` revalida a cada acesso.
+
+## API
+
+| Rota | Função |
+|---|---|
+| `GET /api/save` | Devolve `{state, version, offline}`. Cria ou renova o cookie `__Host-pid`. O ganho offline usa o relógio do servidor e não é gravado. |
+| `PUT /api/save` | Recebe `{state, version, schema_version}`. Versão 0 sem save existente importa o save local. Responde `{version, state, clamped}`. |
+| `POST /api/reset` | Volta ao estado inicial e incrementa a versão. |
+
+Erros: 401 sem sessão, 403 para requisição de outro site, 409 em versão desatualizada (com o estado atual no corpo), 413 acima de 8 KB, 415 sem JSON, 429 se o último save tem menos de 5 s.
+
+O cliente salva a cada 30 s quando o estado muda, e também ao esconder ou fechar a aba, com `keepalive`. Ele também mantém uma cópia em `localStorage`, então o jogo continua sem servidor e sincroniza depois.
+
+## Anti-trapaça
+
+Cada PUT passa pelo `validate` do `game-core`. Prédios, melhorias, cliques e total nunca diminuem. As compras precisam bater com os custos, e melhorias bloqueadas são removidas. O crescimento do total fica limitado a `pps × (Δt + 10 s) + cliques × valor do clique + crédito × max(frenesi, café com prosa)`, com no máximo 40 cliques/s. O crédito de cafezinho fica no D1: ganha 1 a cada 30 s, até 2. Valores acima do limite são cortados e registrados no log, sem punição. A importação do save local só confere a consistência dos custos.
+
+## Medições
+
+Feitas em 23/10/2026, logo após o deploy, a partir da máquina de desenvolvimento, com 50 jogadores sintéticos (`node scripts/bench.mjs https://fornada.versoza.dev 50`).
+
+| Métrica | Valor |
+|---|---|
+| PUT (UPDATE) p50 / p95 | 334 ms / 672 ms |
+| PUT (importação, INSERT) p50 / p95 | 331 ms / 744 ms |
+| Startup do Worker (`wrangler deploy`) | 4 ms |
+| Primeira requisição após o deploy | 369 ms |
+| CPU por requisição p50 / p99 | 1,9 ms / 24 ms (105 requisições, 0 erros) |
+| WASM do cliente | 159 KB, 75 KB com gzip |
+
+O PUT faz duas consultas ao D1 (SELECT e UPDATE), e o primário fica no leste dos EUA. A latência sai quase toda dessas idas e voltas. O Smart Placement deve aproximar o Worker do D1 depois de analisar o tráfego. Como o save roda em segundo plano, o jogador não sente essa latência. O p99 de CPU vem da primeira requisição de cada isolate, quando o WASM compila.
+
+## Custo
+
+No plano Free o custo é zero. Os limites diários são 100 mil requisições ao Worker e 100 mil linhas gravadas no D1. Cada PUT grava uma linha, e os estáticos não contam. Com um save a cada 30 s, isso dá cerca de 830 horas de jogo por dia somando todos os jogadores. Para uns 1.000 jogadores ativos, o plano Workers Paid (US$ 5/mês) cobre o uso dentro da franquia.
+
+## Limites conhecidos
+
+Quantidades são `f64`. Inteiros são exatos até 2^53 (cerca de 9 quatrilhões). Acima disso, incrementos pequenos se perdem, e perto de 1,8e308 o valor vira infinito.
+
+Acima de cerca de 4,4e14, o custo pode diferir em 1 do protótipo: o `pow` do WASM vem do musl e o do navegador é o do V8. Cliente e servidor sempre concordam entre si.
+
+O buff de produção ×7 só vale até expirar, mesmo num frame longo com a aba oculta. No protótipo ele valia pelo tempo todo em que a aba ficava escondida.
+
+Qualquer pessoa pode criar saves em massa e esgotar a cota diária de gravações do D1. O jogo segue funcionando offline nesse caso. A correção é uma regra de rate limit no WAF da zona, que exige a permissão Zone WAF Edit.
+
+A folga de 10 s por save permite que quem envia um PUT a cada 5 s ganhe até 3× a produção.
+
+O bug do protótipo em que prédios ocultos aparecem como caixas vazias foi mantido, por paridade visual: `.item{display:flex}` anula o atributo `hidden`.
