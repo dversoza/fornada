@@ -1,6 +1,6 @@
 use game_core::{
-    BUILDINGS, BuffKind, CafeOutcome, Game, GameState, available_upgrades, building_mult, cost_for,
-    revealed,
+    BUILDINGS, BuffKind, CafeOutcome, Game, GameState, available_upgrades, base_pps, building_mult,
+    cost_for, revealed,
     save::{CAFE_CREDIT_START, SAVE_SCHEMA_VERSION, load_save, to_json, validate},
     upgrades,
 };
@@ -92,6 +92,11 @@ impl Client {
 
     pub fn pps(&self) -> f64 {
         self.game.pps()
+    }
+
+    /// Production per second without buffs.
+    pub fn base_pps(&self) -> f64 {
+        base_pps(&self.game.state)
     }
 
     pub fn building_rate(&self, building: u32) -> f64 {
@@ -203,6 +208,7 @@ mod tests {
         assert_eq!(client.cafe(0.05, 100.0), vec![0.0, 0.0]);
         assert_eq!(client.cafe(0.3, 100.0), vec![1.0, 0.0]);
         assert_eq!(client.buffs(), vec![1.0, 77.0, 13100.0, 0.0, 7.0, 30100.0]);
+        assert_eq!(client.pps(), client.base_pps() * 7.0);
         // min(1000 * 0.15, base_pps 20 * 900) + 13
         assert_eq!(client.cafe(0.9, 100.0), vec![2.0, 163.0]);
     }
