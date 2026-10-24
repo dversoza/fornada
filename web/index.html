@@ -62,29 +62,30 @@ button{font:inherit;color:inherit}
 @keyframes bob{50%{transform:translate(-50%,-62%) rotate(6deg)}}
 
 /* Efeitos do pão */
-.fx{position:absolute;pointer-events:none;opacity:0;transition:opacity .8s}
-.aura{inset:-32%;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--glow) 55%,transparent) 0,color-mix(in srgb,var(--glow) 22%,transparent) 38%,transparent 68%);transform:scale(calc(.6 + var(--power,0)*.8));transition:opacity .8s,transform .8s}
-.t2 .aura{opacity:calc(.5 + var(--power,0)*.5)}
-.boost .aura{opacity:.95;animation:boost 1.2s ease-in-out infinite}
+.fx{position:absolute;pointer-events:none;opacity:0;display:none}
+.aura{inset:-32%;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--glow) 55%,transparent) 0,color-mix(in srgb,var(--glow) 22%,transparent) 38%,transparent 68%);transform:scale(calc(.6 + var(--power,0)*.8));transition:transform .8s}
+.t2 .aura{display:block;opacity:calc(.5 + var(--power,0)*.5)}
+.boost .aura{display:block;opacity:.95;animation:boost 1.2s ease-in-out infinite}
 @keyframes boost{50%{transform:scale(calc(.75 + var(--power,0)*.8))}}
 .steam{inset:0}
 .steam i{position:absolute;top:12%;left:var(--x);width:14%;height:20%;margin-left:-7%;border-radius:50%;background:radial-gradient(closest-side,color-mix(in srgb,var(--muted) 45%,transparent),transparent);opacity:0;animation:steam 3.2s ease-out infinite;animation-delay:var(--d)}
 @keyframes steam{0%{transform:translateY(0) scale(.6);opacity:0}25%{opacity:.7}100%{transform:translateY(-70%) scale(1.5);opacity:0}}
-.t1 .steam{opacity:1}
+.t1 .steam{display:block;opacity:1}
 .sparkles{inset:-6%}
 .sparkles i{position:absolute;left:var(--x);top:var(--y);font-style:normal;font-size:1rem;line-height:1;color:var(--glow);text-shadow:0 0 6px var(--glow);animation:twinkle 2.4s ease-in-out infinite;animation-delay:var(--d)}
 @keyframes twinkle{0%,100%{transform:scale(.4);opacity:.2}50%{transform:scale(1.1);opacity:1}}
-.t3 .sparkles{opacity:1}
+.t3 .sparkles{display:block;opacity:1}
 .rim{inset:9%;border-radius:50%;box-shadow:0 0 22px 4px color-mix(in srgb,var(--glow) 65%,transparent),inset 0 0 18px 2px color-mix(in srgb,var(--glow) 40%,transparent)}
-.t4 .rim{opacity:.85}
+.t4 .rim{display:block;opacity:.85}
 .t5 .rim{animation:halo 2.4s ease-in-out infinite}
 @keyframes halo{0%,100%{opacity:.6}50%{opacity:1}}
 .rays{inset:-30%;border-radius:50%;background:repeating-conic-gradient(color-mix(in srgb,var(--glow) 40%,transparent) 0 5deg,transparent 5deg 15deg);-webkit-mask-image:radial-gradient(circle,transparent 30%,#000 42%,transparent 70%);mask-image:radial-gradient(circle,transparent 30%,#000 42%,transparent 70%);animation:spin 50s linear infinite}
-.t5 .rays{opacity:.8}
+.t5 .rays{display:block;opacity:.8}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* Órbita */
 .orbit{--r:calc(var(--pw)*.56);--os:1.3rem;position:absolute;inset:0;z-index:1;pointer-events:none;animation:spin 70s linear infinite}
+.orbit:empty{animation:none}
 .orb{position:absolute;left:50%;top:50%;width:0;height:0;transform:rotate(var(--a)) translateX(var(--r))}
 .ic{position:absolute;left:0;top:0;width:1.6em;height:1.6em;margin:-.8em 0 0 -.8em;font-size:var(--os);line-height:1.6em;text-align:center;transform:rotate(calc(-1*var(--a)));animation:unspin 70s linear infinite}
 @keyframes unspin{from{transform:rotate(calc(-1*var(--a)))}to{transform:rotate(calc(-1*var(--a) - 360deg))}}
@@ -163,13 +164,22 @@ button{font:inherit;color:inherit}
 }
 @media (prefers-reduced-motion:reduce){
   .float{animation:fade .9s forwards}
-  @keyframes fade{to{opacity:0}}
   .cafe,.pao.pop svg,.item.shake{animation:none}
   .pao{transition:none}
   .orbit,.ic,.rays,.steam i,.sparkles i,.t5 .rim,.boost .aura{animation:none}
-  .steam{display:none}
-  .fx{transition:none}
+  .steam{display:none!important}
 }
+/* Mesmo visual do movimento reduzido: JS põe .calm quando "Efeitos animados" está desligado */
+.calm .float{animation:fade .9s forwards}
+.calm .cafe,.calm .pao.pop svg,.calm .item.shake{animation:none}
+.calm .pao{transition:none}
+.calm .orbit,.calm .ic,.calm .rays,.calm .steam i,.calm .sparkles i,.calm .t5 .rim,.calm .boost .aura{animation:none}
+.calm .steam{display:none!important}
+@keyframes fade{to{opacity:0}}
+/* Sem toque por 20 s: pausa as animações contínuas */
+.idle .orbit,.idle .ic,.idle .fx,.idle .fx *,.idle .cafe{animation-play-state:paused}
+.btn[aria-pressed=true]{border-color:var(--azul);color:var(--azul)}
+.btn[aria-pressed=true]::before{content:"✓ " / ""}
 </style>
 </head>
 <body>
@@ -241,6 +251,7 @@ button{font:inherit;color:inherit}
     <p class="save-status" id="saveStatus"></p>
     <div class="actions">
       <button class="btn" id="saveNow">Salvar agora</button>
+      <button class="btn" id="fxToggle" aria-pressed="true">Efeitos animados</button>
       <button class="btn reset" id="reset">Recomeçar do zero</button>
     </div>
   </aside>
@@ -416,6 +427,14 @@ async function saveNow(){
 const $ = id => document.getElementById(id);
 const stage=$('stage'), pao=$('pao'), paoWrap=$('paowrap'), orbitEl=$('orbit'), shelfEl=$('shelf'), upsEl=$('ups'), bldsEl=$('blds'), toastEl=$('toast');
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const FX_KEY = 'pdq-fx';
+let fxOn = true;
+try{ fxOn = localStorage.getItem(FX_KEY) !== '0'; }catch(e){}
+const calm = () => !fxOn || reduceMotion.matches;
+const rootEl = document.documentElement;
+function applyCalm(){ rootEl.classList.toggle('calm', calm()); }
+applyCalm();
+reduceMotion.addEventListener('change', applyCalm);
 function setText(el, t){ if(el._t !== t){ el.textContent = t; el._t = t; } }
 function setAttr(el, name, v){ v = String(v); if(el._a?.[name] !== v){ el.setAttribute(name, v); (el._a ??= {})[name] = v; } }
 function setClass(el, name, on){ if(el._c?.[name] !== on){ el.classList.toggle(name, on); (el._c ??= {})[name] = on; } }
@@ -433,7 +452,7 @@ const { buildings: B, upgrades: UPGRADES } = JSON.parse(catalog_json());
 
 // Mirrors the CSS keyframes pop and shake; each key carries its own easing like animation-timing-function.
 function shake(el){
-  if(reduceMotion.matches) return;
+  if(calm()) return;
   el.animate([
     {transform:'translateX(0)', easing:'ease'},
     {transform:'translateX(-4px)', offset:.25, easing:'ease'},
@@ -442,7 +461,7 @@ function shake(el){
   ], {duration:250});
 }
 function pop(el){
-  if(reduceMotion.matches) return;
+  if(calm()) return;
   el.animate([
     {transform:'scale(1)', easing:'ease-out'},
     {transform:'scale(1.06)', offset:.4, easing:'ease-out'},
@@ -453,7 +472,7 @@ function pop(el){
 // Efeitos de compra: ícone voa da loja até o pão, migalhas e pulo na vitrine
 let flyers = 0, crumbs = 0;
 function flightRects(el){
-  if(reduceMotion.matches || flyers >= 6) return null;
+  if(calm() || flyers >= 6) return null;
   return [el.getBoundingClientRect(), paoWrap.getBoundingClientRect()];
 }
 function fly(icon, rects, onArrive){
@@ -491,11 +510,11 @@ function burst(x, y){
   }
 }
 function popIn(el){
-  if(reduceMotion.matches) return;
+  if(calm()) return;
   el.animate([{transform:'scale(0)', easing:'ease-out'}, {transform:'scale(1.4)', offset:.6, easing:'ease-in-out'}, {transform:'scale(1)'}], {duration:450});
 }
 function bump(el){
-  if(reduceMotion.matches) return;
+  if(calm()) return;
   el.animate([
     {transform:'scale(1)', easing:'ease-out'},
     {transform:'scale(1.3)', offset:.4, easing:'ease-in-out'},
@@ -504,14 +523,17 @@ function bump(el){
 }
 
 // Clique no pão
-let floats = 0;
+let floats = 0, floatRaf = 0;
 const floatQueue = [];
 const paoSvg = pao.querySelector('svg');
 pao.addEventListener('click', e => {
+  // O loop roda a 15 Hz: descarta buffs vencidos antes de valorar o clique.
+  client.tick(0, performance.now());
   const v = client.click();
   pop(paoSvg);
   if(floats + floatQueue.length > 40) return;
   floatQueue.push({x:e.clientX, y:e.clientY, keyboard:!e.detail || (!e.clientX && !e.clientY), text:'+' + fmt(v, v<10?1:0)});
+  floatRaf ||= requestAnimationFrame(() => { floatRaf = 0; flushFloats(); });
 });
 function flushFloats(){
   const r = stage.getBoundingClientRect();
@@ -548,6 +570,7 @@ const bItems = B.map((b, i) => {
 });
 
 function renderBuildings(){
+  const buy = client.buy();
   let lockedShown = false;
   B.forEach((b, i) => {
     const it = bItems[i];
@@ -563,13 +586,17 @@ function renderBuildings(){
     setText(it.nm, locked ? '???' : b.name);
     setText(it.ds, locked ? 'Faça mais pães de queijo para descobrir.' : b.desc);
     const c = client.cost(i);
-    setText(it.cost, fmt(c));
-    setText(it.rate, locked ? '' : `${fmt(client.building_rate(i),1)}/s cada`);
-    setText(it.own, own ? fmt(own) : '');
+    if(own !== it.n || c !== it.c || buy !== it.buy || locked !== it.lk){
+      it.n = own; it.c = c; it.buy = buy; it.lk = locked;
+      setText(it.cost, fmt(c));
+      setText(it.own, own ? fmt(own) : '');
+      setAttr(it.el, 'aria-label', locked ? `Produção ainda não descoberta, custa ${fmt(c)}` : `${b.name}, tem ${own}, comprar ${buy} por ${fmt(c)}`);
+    }
+    const rate = locked ? -1 : client.building_rate(i);
+    if(rate !== it.rate_){ it.rate_ = rate; setText(it.rate, locked ? '' : `${fmt(rate,1)}/s cada`); }
     const poor = locked || client.bank() < c;
     setClass(it.el, 'poor', poor);
     setAttr(it.el, 'aria-disabled', poor);
-    setAttr(it.el, 'aria-label', locked ? `Produção ainda não descoberta, custa ${fmt(c)}` : `${b.name}, tem ${own}, comprar ${client.buy()} por ${fmt(c)}`);
   });
 }
 
@@ -720,6 +747,16 @@ saveBtn.addEventListener('click', async () => {
   toast(ok ? 'Progresso salvo.' : 'Não foi possível salvar agora. O progresso fica salvo neste aparelho.');
 });
 
+// Efeitos animados
+const fxBtn = $('fxToggle');
+fxBtn.addEventListener('click', () => {
+  fxOn = !fxOn;
+  try{ localStorage.setItem(FX_KEY, fxOn ? '1' : '0'); }catch(e){}
+  fxBtn.setAttribute('aria-pressed', String(fxOn));
+  applyCalm();
+});
+fxBtn.setAttribute('aria-pressed', String(fxOn));
+
 // Reset
 const resetBtn = $('reset'); let resetTimer;
 resetBtn.addEventListener('click', async () => {
@@ -753,7 +790,6 @@ function buffText(now){
   return parts.join('  ');
 }
 function render(now){
-  if(floatQueue.length) flushFloats();
   const b = Math.floor(client.bank());
   setText(bankEl, fmt(b));
   setText(unitEl, b === 1 ? 'pão de queijo' : 'pães de queijo');
@@ -770,7 +806,8 @@ function render(now){
   if(now - lastTitle > 1000){ document.title = `${fmt(b)} pães de queijo · Pão de Queijo Clicker`; lastTitle = now; }
 }
 
-// Loop
+// Loop: ~15 Hz; dt é o tempo real, então a simulação continua exata.
+const TICK_MS = 66, IDLE_MS = 20000;
 let last = 0;
 function frame(now){
   const dt = Math.max(0, (now - last)/1000); last = now;
@@ -778,8 +815,13 @@ function frame(now){
   if(!cafeEl && now >= nextCafe) spawnCafe(now);
   if(cafeEl && now >= cafeUntil) removeCafe();
   render(now);
-  requestAnimationFrame(frame);
+  if(!idle && now - lastInput > IDLE_MS){ idle = true; rootEl.classList.add('idle'); }
+  setTimeout(() => requestAnimationFrame(frame), TICK_MS);
 }
+// Sem entrada por 20 s as animações contínuas pausam; qualquer entrada retoma.
+let lastInput = performance.now(), idle = false;
+const onInput = () => { lastInput = performance.now(); if(idle){ idle = false; rootEl.classList.remove('idle'); } };
+for(const ev of ['pointerdown', 'pointermove', 'keydown', 'touchstart', 'wheel', 'visibilitychange']) addEventListener(ev, onInput, {passive:true, capture:true});
 
 // Início: o jogo começa na hora com o espelho local; a API sincroniza em segundo plano.
 let raw = null;
