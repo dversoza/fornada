@@ -97,6 +97,14 @@ Em produção, o `state` médio tem 65 bytes e o maior tem 189. Um save com todo
 
 Cada PUT passa pelo `validate` do `game-core`. Prédios, melhorias, cliques e total nunca diminuem. As compras precisam bater com os custos, e melhorias bloqueadas são removidas. O crescimento do total fica limitado a `pps × (Δt + 10 s) + cliques × valor do clique + crédito × max(frenesi, café com prosa)`, com no máximo 40 cliques/s. O crédito de cafezinho fica no D1: ganha 1 a cada 30 s, até 2. Valores acima do limite são cortados e registrados no log, sem punição. A importação do save local só confere a consistência dos custos.
 
+## Telemetria
+
+O cliente envia a cada 5 minutos de jogo visível (e quando a aba sai de vista ou fecha, se passou de 60 s) uma amostra de desempenho para `POST /api/telemetry`: segundos cobertos, taxa do loop, tempo de JS por tick (média e p95 arredondado para a faixa 1/2/4/.../128 ms; não inclui estilo, layout e pintura), quadros travados (intervalo acima de 250 ms), fração parada, modo de efeitos, nível do pão, se o aparelho é de toque, `devicePixelRatio`, núcleos, memória e cliques por minuto.
+
+A coleta é anônima: a requisição vai sem cookie (`credentials: 'omit'`) e a amostra não leva id, save nem horário. O Worker acrescenta só o país e uma família grosseira do navegador e grava uma linha no log. Os logs automáticos de cada requisição (`invocation_logs`) estão desligados, então nenhum IP, cabeçalho ou cidade é registrado. Contagem de requisições, erros e CPU continuam no painel de métricas do Worker.
+
+Para ver os dados: painel da Cloudflare, Workers & Pages, fornada, Observability, filtro `event = perf`. O Workers Logs guarda os eventos por 3 dias.
+
 ## Medições
 
 Feitas em 23/10/2026, logo após o deploy, a partir da máquina de desenvolvimento, com 50 jogadores sintéticos (`node scripts/bench.mjs https://fornada.versoza.dev 50`).
@@ -123,6 +131,8 @@ Quantidades são `f64`. Inteiros são exatos até 2^53 (cerca de 9 quatrilhões)
 Acima de cerca de 4,4e14, o custo pode diferir em 1 do protótipo: o `pow` do WASM vem do musl e o do navegador é o do V8. Cliente e servidor sempre concordam entre si.
 
 O buff de produção ×7 só vale até expirar, mesmo num frame longo com a aba oculta. No protótipo ele valia pelo tempo todo em que a aba ficava escondida.
+
+A CPU do Worker passa do limite de 10 ms do plano Free nas primeiras requisições de cada isolate novo: as cerca de 10 primeiras custam de 7 a 19 ms, e as seguintes de 1 a 2 ms. Com pouco tráfego os isolates esfriam, então nas 24 h medidas em 24/10/2026 o p90 foi 12 ms e o p99 22 ms, com 0 erros em 819 requisições. Ajustes de compilação (`opt-level`, `wasm-opt`, `panic=abort`) mudaram menos de 1%. Se aparecerem erros de CPU excedida (status `exceededCpu` no GraphQL `workersInvocationsAdaptive`), as saídas são o Workers Paid (limite de 30 s) ou mover o roteamento para JS e deixar o WASM só na validação.
 
 Qualquer pessoa pode criar saves em massa e esgotar a cota diária de gravações do D1. O jogo segue funcionando offline nesse caso. A correção é uma regra de rate limit no WAF da zona, que exige a permissão Zone WAF Edit.
 
