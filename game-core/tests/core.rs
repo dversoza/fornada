@@ -24,12 +24,14 @@ type ProtoUpgrade = (
     Unlock,
 );
 
+// Naming unified on the user's request: the prototype's "pão"/"pãezinhos" in descriptions
+// became "pão de queijo"/"pães de queijo". This is a deliberate deviation.
 const PROTOTYPE_BUILDINGS: [ProtoBuilding; 8] = [
     (
         "vovo",
         "👵",
         "Vovó mineira",
-        "Enrola pãezinhos enquanto conta causo.",
+        "Enrola pães de queijo enquanto conta causo.",
         15.0,
         0.1,
         ["Avental florido", "Rádio na cozinha", "Neta ajudante"],
@@ -51,7 +53,7 @@ const PROTOTYPE_BUILDINGS: [ProtoBuilding; 8] = [
         "padaria",
         "🏪",
         "Padaria da esquina",
-        "Pão quentinho de hora em hora.",
+        "Pão de queijo quentinho de hora em hora.",
         1100.0,
         8.0,
         ["Balcão de vidro", "Fila na porta", "Vitrine aquecida"],
@@ -60,7 +62,7 @@ const PROTOTYPE_BUILDINGS: [ProtoBuilding; 8] = [
         "queijaria",
         "🧀",
         "Queijaria na Canastra",
-        "Queijo bom faz pão bom.",
+        "Queijo bom faz pão de queijo bom.",
         12000.0,
         47.0,
         ["Leite da manhã", "Cura de 30 dias", "Selo de origem"],
