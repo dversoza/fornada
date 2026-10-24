@@ -132,4 +132,6 @@ A folga de 10 s por save permite que quem envia um PUT a cada 5 s ganhe até 3×
 
 Os prédios ainda não revelados não aparecem mais como caixas vazias na loja. No protótipo, o `.item{display:flex}` anulava o atributo `hidden`.
 
-O pão evolui com a produção: a aura começa em 100/s, o brilho em 10 mil/s, a borda dourada em 1 milhão/s e os raios em 1 bilhão/s. Ícones dos prédios comprados giram em volta dele. Uma vitrine abaixo mostra cada prédio com a quantidade, e cada compra voa da loja até o pão. As animações contínuas respeitam `prefers-reduced-motion`.
+O pão evolui com a produção: a aura começa em 100/s, o brilho em 10 mil/s, a borda dourada em 1 milhão/s e os raios em 1 bilhão/s. Ícones dos prédios comprados giram em volta dele. Uma vitrine abaixo mostra cada prédio com a quantidade, e cada compra voa da loja até o pão. As animações contínuas respeitam `prefers-reduced-motion`, pausam após 20 s sem toque e podem ser desligadas em Ajustes (Efeitos animados, guardado em `localStorage` como `pdq-fx`). Se o sistema pede movimento reduzido, essa preferência vence o botão.
+
+O loop do jogo roda a cerca de 15 Hz (`setTimeout` + `requestAnimationFrame`), com o tempo real decorrido, então a simulação continua exata. Medido em Chrome headless com CPU 4× mais lenta, num save avançado: CPU de 11,8% para 5,2%, 3,75% parado após 20 s e 3,2% com os efeitos desligados.

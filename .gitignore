@@ -6,3 +6,4 @@ dist/
 node_modules/
 .wrangler/
 worker/build/
+.impeccable/
