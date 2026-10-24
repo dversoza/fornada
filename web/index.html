@@ -45,8 +45,9 @@ button{font:inherit;color:inherit}
 .bank{font-family:'Bagel Fat One','Arial Rounded MT Bold',system-ui,sans-serif;font-size:clamp(2.4rem,6vw,4rem);line-height:1;margin:4px 0 0;font-variant-numeric:tabular-nums}
 .unit{color:var(--muted);margin:0}
 .pps{margin:0;font-weight:600}
+.cpc{margin:0;font-size:.85rem;color:var(--muted)}
 .buffs{min-height:1.3em;margin:0;font-size:.9rem;color:var(--plus);font-weight:600}
-.brand,.bank,.unit,.pps,.buffs,.shelf{position:relative;z-index:1}
+.brand,.bank,.unit,.pps,.cpc,.buffs,.shelf{position:relative;z-index:1}
 .paowrap{--pw:clamp(180px,min(32vw,38svh),340px);position:relative;width:var(--pw);aspect-ratio:1;margin:calc(var(--pw)*.1 + 4px) 0;flex:none}
 .pao{appearance:none;border:0;background:none;padding:0;cursor:pointer;position:relative;z-index:1;width:100%;aspect-ratio:1;border-radius:50%;touch-action:manipulation;transition:transform .08s ease-out;display:block}
 .pao:active{transform:scale(.94)}
@@ -178,6 +179,7 @@ button{font:inherit;color:inherit}
     <p class="bank" id="bank">0</p>
     <p class="unit" id="unit">pães de queijo</p>
     <p class="pps" id="pps">0 por segundo</p>
+    <p class="cpc" id="cpc">1 por clique</p>
     <p class="buffs" id="buffs" aria-live="polite"></p>
     <div class="paowrap" id="paowrap">
     <div class="fx aura" aria-hidden="true"></div>
@@ -559,7 +561,7 @@ function renderBuildings(){
     const own = client.owned(i);
     setText(it.ico, locked ? '❔' : b.icon);
     setText(it.nm, locked ? '???' : b.name);
-    setText(it.ds, locked ? 'Faça mais pães para descobrir.' : b.desc);
+    setText(it.ds, locked ? 'Faça mais pães de queijo para descobrir.' : b.desc);
     const c = client.cost(i);
     setText(it.cost, fmt(c));
     setText(it.rate, locked ? '' : `${fmt(client.building_rate(i),1)}/s cada`);
@@ -580,7 +582,7 @@ function renderUpgrades(){
     upKey = key; upsEl.innerHTML = ''; upItems = [];
     if(!avail.length){
       const p = document.createElement('p'); p.className='empty';
-      p.textContent = 'Continue fazendo pães para liberar melhorias.';
+      p.textContent = 'Continue fazendo pães de queijo para liberar melhorias.';
       upsEl.appendChild(p);
     }
     for(const i of avail){
@@ -742,7 +744,7 @@ resetBtn.addEventListener('click', async () => {
 });
 
 // Render principal
-const bankEl=$('bank'), unitEl=$('unit'), ppsEl=$('pps'), buffsEl=$('buffs'), statTotal=$('statTotal'), statClicks=$('statClicks'), saveStatus=$('saveStatus');
+const bankEl=$('bank'), unitEl=$('unit'), ppsEl=$('pps'), cpcEl=$('cpc'), buffsEl=$('buffs'), statTotal=$('statTotal'), statClicks=$('statClicks'), saveStatus=$('saveStatus');
 let lastTitle = 0;
 function buffText(now){
   const f = client.buffs(), parts = [];
@@ -756,15 +758,16 @@ function render(now){
   setText(bankEl, fmt(b));
   setText(unitEl, b === 1 ? 'pão de queijo' : 'pães de queijo');
   setText(ppsEl, `${fmt(client.pps(),1)} por segundo`);
+  setText(cpcEl, `${fmt(client.click_value(),1)} por clique`);
   const buffs = buffText(now);
   setText(buffsEl, buffs);
   renderStage(buffs !== '');
-  setText(statTotal, `Pães feitos no total: ${fmt(Math.floor(client.total()))}`);
-  setText(statClicks, `Cliques no pão: ${fmt(client.clicks())}`);
+  setText(statTotal, `Pães de queijo feitos no total: ${fmt(Math.floor(client.total()))}`);
+  setText(statClicks, `Cliques no pão de queijo: ${fmt(client.clicks())}`);
   setText(saveStatus, saving ? 'Salvando...' : outage ? 'Sem conexão: salvo só neste aparelho' : savedText);
   renderUpgrades();
   renderBuildings();
-  if(now - lastTitle > 1000){ document.title = `${fmt(b)} pães · Pão de Queijo Clicker`; lastTitle = now; }
+  if(now - lastTitle > 1000){ document.title = `${fmt(b)} pães de queijo · Pão de Queijo Clicker`; lastTitle = now; }
 }
 
 // Loop

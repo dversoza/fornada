@@ -94,6 +94,11 @@ impl Client {
         self.game.pps()
     }
 
+    /// Value of one click including active buffs.
+    pub fn click_value(&self) -> f64 {
+        self.game.click_value()
+    }
+
     /// Production per second without buffs.
     pub fn base_pps(&self) -> f64 {
         base_pps(&self.game.state)
@@ -209,6 +214,8 @@ mod tests {
         assert_eq!(client.cafe(0.3, 100.0), vec![1.0, 0.0]);
         assert_eq!(client.buffs(), vec![1.0, 77.0, 13100.0, 0.0, 7.0, 30100.0]);
         assert_eq!(client.pps(), client.base_pps() * 7.0);
+        // click_base 1 * prod 7 * click frenzy 77
+        assert_eq!(client.click_value(), 539.0);
         // min(1000 * 0.15, base_pps 20 * 900) + 13
         assert_eq!(client.cafe(0.9, 100.0), vec![2.0, 163.0]);
     }
