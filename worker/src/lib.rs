@@ -7,6 +7,7 @@ use serde_json::{json, value::RawValue};
 use worker::*;
 
 const MAX_BODY_BYTES: usize = 8 * 1024;
+const MAX_TELEMETRY_BYTES: usize = 1024;
 const COOKIE_MAX_AGE_SECS: u32 = 31_536_000;
 const COOKIE_NAME: &str = "__Host-pid";
 /// Closer PUTs would each earn the 10 s time slack again.
@@ -159,6 +160,19 @@ fn reject_cross_origin(req: &Request) -> Result<Option<Response>> {
     Ok(None)
 }
 
+/// Checks Content-Length before reading; None means the body is over `max` bytes.
+async fn read_limited(req: &mut Request, max: usize) -> Result<Option<Vec<u8>>> {
+    let declared = req.headers().get("Content-Length")?;
+    if declared
+        .and_then(|n| n.parse::<usize>().ok())
+        .is_some_and(|n| n > max)
+    {
+        return Ok(None);
+    }
+    let bytes = req.bytes().await?;
+    Ok((bytes.len() <= max).then_some(bytes))
+}
+
 async fn put_save(mut req: Request, env: Env) -> Result<Response> {
     if let Some(res) = reject_cross_origin(&req)? {
         return Ok(res);
@@ -166,17 +180,9 @@ async fn put_save(mut req: Request, env: Env) -> Result<Response> {
     let Some(pid) = cookie_pid(&req)? else {
         return error(401, "missing session");
     };
-    let declared = req.headers().get("Content-Length")?;
-    if declared
-        .and_then(|n| n.parse::<usize>().ok())
-        .is_some_and(|n| n > MAX_BODY_BYTES)
-    {
+    let Some(bytes) = read_limited(&mut req, MAX_BODY_BYTES).await? else {
         return error(413, "body too large");
-    }
-    let bytes = req.bytes().await?;
-    if bytes.len() > MAX_BODY_BYTES {
-        return error(413, "body too large");
-    }
+    };
     let Ok(body) = serde_json::from_slice::<PutBody>(&bytes) else {
         return error(400, "malformed body");
     };
@@ -301,12 +307,137 @@ async fn reset(req: Request, env: Env) -> Result<Response> {
     )
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Fx {
+    On,
+    Off,
+    Reduced,
+}
+
+#[derive(Deserialize)]
+struct PerfSample {
+    secs: f64,
+    hz: f64,
+    render_ms_avg: f64,
+    render_ms_p95: f64,
+    jank: f64,
+    idle_frac: f64,
+    fx: Fx,
+    tier: f64,
+    mobile: bool,
+    dpr: f64,
+    cores: f64,
+    mem: Option<f64>,
+    clicks_per_min: f64,
+}
+
+/// None when the number is not finite, so the sample is rejected.
+fn clamp(v: f64, lo: f64, hi: f64) -> Option<f64> {
+    v.is_finite().then(|| v.clamp(lo, hi))
+}
+
+fn ua_family(ua: &str) -> &'static str {
+    let has = |s: &str| ua.contains(s);
+    if has("Firefox") || has("FxiOS") {
+        "firefox"
+    } else if has("iPhone") || has("iPad") {
+        "ios-safari"
+    } else if has("Android") {
+        if has("Chrome") && !has("Edg") && !has("OPR") {
+            "android-chrome"
+        } else {
+            "other"
+        }
+    } else if has("Edg/") || has("OPR/") {
+        "other"
+    } else if has("Chrome") {
+        "desktop-chrome"
+    } else if has("Safari") {
+        "desktop-safari"
+    } else {
+        "other"
+    }
+}
+
+/// Anonymous aggregate telemetry: no cookie, no body echo, nothing that identifies the request.
+async fn post_telemetry(mut req: Request) -> Result<Response> {
+    if let Some(res) = reject_cross_origin(&req)? {
+        return Ok(res);
+    }
+    let Some(bytes) = read_limited(&mut req, MAX_TELEMETRY_BYTES).await? else {
+        return error(413, "body too large");
+    };
+    let Ok(s) = serde_json::from_slice::<PerfSample>(&bytes) else {
+        return error(400, "malformed body");
+    };
+    let mem = match s.mem {
+        Some(m) => match clamp(m, 0.0, 512.0) {
+            Some(m) => Some(m),
+            None => return error(400, "malformed body"),
+        },
+        None => None,
+    };
+    let fields = (
+        clamp(s.secs, 0.0, 3600.0),
+        clamp(s.hz, 0.0, 240.0),
+        clamp(s.render_ms_avg, 0.0, 1000.0),
+        clamp(s.render_ms_p95, 0.0, 1000.0),
+        clamp(s.jank, 0.0, 100_000.0),
+        clamp(s.idle_frac, 0.0, 1.0),
+        clamp(s.tier, 0.0, 5.0),
+        clamp(s.dpr, 0.0, 10.0),
+        clamp(s.cores, 0.0, 256.0),
+        clamp(s.clicks_per_min, 0.0, 1000.0),
+    );
+    let (
+        Some(secs),
+        Some(hz),
+        Some(avg),
+        Some(p95),
+        Some(jank),
+        Some(idle_frac),
+        Some(tier),
+        Some(dpr),
+        Some(cores),
+        Some(cpm),
+    ) = fields
+    else {
+        return error(400, "malformed body");
+    };
+    let ua = req.headers().get("User-Agent")?.unwrap_or_default();
+    let country = req.cf().and_then(|cf| cf.country());
+    console_log!(
+        "{}",
+        json!({
+            "event": "perf",
+            "v": 1,
+            "secs": secs,
+            "hz": hz,
+            "render_ms_avg": avg,
+            "render_ms_p95": p95,
+            "jank": jank.round(),
+            "idle_frac": idle_frac,
+            "fx": match s.fx { Fx::On => "on", Fx::Off => "off", Fx::Reduced => "reduced" },
+            "tier": tier.round(),
+            "mobile": s.mobile,
+            "dpr": dpr,
+            "cores": cores.round(),
+            "mem": mem,
+            "clicks_per_min": cpm,
+            "country": country,
+            "ua": ua_family(&ua),
+        })
+    );
+    Ok(Response::empty()?.with_status(204))
+}
+
 async fn route(req: Request, env: Env) -> Result<Response> {
     let path = req.path();
     let method = req.method();
     let allowed: &[Method] = match path.as_str() {
         "/api/save" => &[Method::Get, Method::Put],
-        "/api/reset" => &[Method::Post],
+        "/api/reset" | "/api/telemetry" => &[Method::Post],
         _ => return error(404, "not found"),
     };
     if !allowed.contains(&method) {
@@ -318,6 +449,7 @@ async fn route(req: Request, env: Env) -> Result<Response> {
     match (path.as_str(), method) {
         ("/api/save", Method::Get) => get_save(req, env).await,
         ("/api/save", _) => put_save(req, env).await,
+        ("/api/telemetry", _) => post_telemetry(req).await,
         _ => reset(req, env).await,
     }
 }

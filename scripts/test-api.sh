@@ -28,4 +28,4 @@ for _ in $(seq 1 600); do
 done
 curl -fs -o /dev/null "http://127.0.0.1:$port/api/save" || { cat "$log" >&2; echo "dev server not ready" >&2; exit 1; }
 
-BASE_URL="http://127.0.0.1:$port" PERSIST_DIR="$persist" node --test tests/api.test.mjs || { tail -40 "$log" >&2; exit 1; }
+BASE_URL="http://127.0.0.1:$port" PERSIST_DIR="$persist" LOG_FILE="$log" node --test tests/api.test.mjs || { tail -40 "$log" >&2; exit 1; }

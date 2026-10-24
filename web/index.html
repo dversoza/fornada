@@ -528,6 +528,7 @@ pao.addEventListener('click', e => {
   // O loop roda a 15 Hz: descarta buffs vencidos antes de valorar o clique.
   client.tick(0, performance.now());
   const v = client.click();
+  perf.clicks++;
   pop(paoSvg);
   if(floats + floatQueue.length > 40) return;
   floatQueue.push({x:e.clientX, y:e.clientY, keyboard:!e.detail || (!e.clientX && !e.clientY), text:'+' + fmt(v, v<10?1:0)});
@@ -659,6 +660,7 @@ function renderPaoFx(boost){
   const base = client.base_pps();
   let tier = 0;
   while(tier < TIERS.length && base >= TIERS[tier]) tier++;
+  perf.tier = tier;
   for(let n = 1; n <= TIERS.length; n++) setClass(paoWrap, 't' + n, tier >= n);
   setClass(paoWrap, 'boost', boost);
   setVar(paoWrap, '--power', Math.round(Math.min(1, Math.max(0, Math.log10(Math.max(base, 1))/12))*20)/20);
@@ -818,13 +820,51 @@ function render(now){
 
 // Loop: ~15 Hz; dt é o tempo real, então a simulação continua exata.
 const TICK_MS = 66, IDLE_MS = 20000;
+// Telemetria anônima: contadores fixos, sem alocação por frame. Envia a cada 5 min visíveis.
+const PERF_BINS = [1, 2, 4, 8, 16, 32, 64, 128], PERF_SEND_SECS = 300, PERF_MIN_SECS = 60;
+const perf = {tier:0, clicks:0, n:0, gapMs:0, idleMs:0, workMs:0, jank:0, bins:new Array(PERF_BINS.length).fill(0), skip:true};
+function perfSample(){
+  const secs = perf.gapMs/1000;
+  let seen = 0, p95 = PERF_BINS[PERF_BINS.length - 1];
+  for(let i = 0; i < PERF_BINS.length; i++){ seen += perf.bins[i]; if(seen >= perf.n*0.95){ p95 = PERF_BINS[i]; break; } }
+  const r = (v, d = 2) => +v.toFixed(d);
+  return {secs:r(secs, 1), hz:r(perf.n/secs), render_ms_avg:r(perf.workMs/perf.n), render_ms_p95:p95, jank:perf.jank,
+    idle_frac:r(perf.idleMs/perf.gapMs), fx:reduceMotion.matches ? 'reduced' : fxOn ? 'on' : 'off', tier:perf.tier,
+    mobile:matchMedia('(pointer:coarse)').matches, dpr:r(devicePixelRatio), cores:navigator.hardwareConcurrency || 1,
+    mem:navigator.deviceMemory ?? null, clicks_per_min:r(perf.clicks/(secs/60))};
+}
+function perfFlush(minSecs){
+  if(perf.gapMs/1000 >= minSecs && perf.n > 0){
+    try{ fetch('/api/telemetry', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(perfSample()), keepalive:true, credentials:'omit'}).catch(() => {}); }catch(e){}
+  }
+  perf.n = perf.gapMs = perf.idleMs = perf.workMs = perf.jank = perf.clicks = 0;
+  perf.bins.fill(0);
+  perf.skip = true;
+}
+// Celulares costumam matar a aba sem pagehide: envia também quando ela sai de vista.
+document.addEventListener('visibilitychange', () => { perf.skip = true; if(document.hidden) perfFlush(PERF_MIN_SECS); });
+addEventListener('pagehide', () => perfFlush(PERF_MIN_SECS));
+
 let last = 0;
 function frame(now){
-  const dt = Math.max(0, (now - last)/1000); last = now;
+  const gap = now - last, dt = Math.max(0, gap/1000); last = now;
+  const t0 = performance.now();
   client.tick(dt, now);
   if(!cafeEl && now >= nextCafe) spawnCafe(now);
   if(cafeEl && now >= cafeUntil) removeCafe();
   render(now);
+  // Um intervalo de mais de 5 s é sono do aparelho ou aba oculta, não travada.
+  if(perf.skip || gap > 5000) perf.skip = document.hidden;
+  else{
+    const work = performance.now() - t0;
+    perf.n++; perf.gapMs += gap; perf.workMs += work;
+    if(idle) perf.idleMs += gap;
+    if(gap > 250) perf.jank++;
+    let b = 0;
+    while(b < PERF_BINS.length - 1 && work > PERF_BINS[b]) b++;
+    perf.bins[b]++;
+    if(perf.gapMs >= PERF_SEND_SECS*1000) perfFlush(0);
+  }
   if(!idle && now - lastInput > IDLE_MS){ idle = true; rootEl.classList.add('idle'); }
   setTimeout(() => requestAnimationFrame(frame), TICK_MS);
 }

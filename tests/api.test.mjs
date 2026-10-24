@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const BASE = process.env.BASE_URL;
 const PERSIST = process.env.PERSIST_DIR;
+const LOG_FILE = process.env.LOG_FILE;
 const COOKIE = '__Host-pid';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -242,6 +244,57 @@ test('error statuses', async () => {
   assert.equal(res.status, 405);
   assert.equal(res.headers.get('allow'), 'POST');
   assert.equal((await p.call('POST', '/api/save', {})).status, 405);
+});
+
+const SAMPLE = { secs: 300, hz: 14.9, render_ms_avg: 2.5, render_ms_p95: 4, jank: 1, idle_frac: 0.2, fx: 'on', tier: 2, mobile: true, dpr: 3, cores: 6, mem: null, clicks_per_min: 40 };
+const telemetry = (body, headers = {}) => fetch(`${BASE}/api/telemetry`, {
+  method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body),
+});
+
+const perfLine = async (match) => {
+  const deadline = Date.now() + 5000;
+  let line;
+  while (!line && Date.now() < deadline) {
+    line = readFileSync(LOG_FILE, 'utf8').split('\n').find((l) => l.includes('"event":"perf"') && match(l));
+    if (!line) await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(line, 'perf line reached the log');
+  return line;
+};
+
+test('telemetry accepts a valid sample, logs it without the pid and refuses bad requests', async () => {
+  const p = await player();
+  const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1';
+  let res = await telemetry({ ...SAMPLE, extra: 'ignored' }, { cookie: `${COOKIE}=${p.pid}`, 'user-agent': ua, 'sec-fetch-site': 'same-origin' });
+  assert.equal(res.status, 204);
+  assert.equal(await res.text(), '');
+
+  const line = await perfLine(() => true);
+  assert.ok(!line.includes(p.pid), 'log line has no pid');
+  const logged = JSON.parse(line.slice(line.indexOf('{')));
+  assert.deepEqual([logged.event, logged.v, logged.ua, logged.tier, logged.secs], ['perf', 1, 'ios-safari', 2, 300]);
+  assert.equal('extra' in logged, false);
+
+  res = await telemetry({ ...SAMPLE, secs: -5, idle_frac: 3, tier: 9, hz: 1000, mem: 9999, clicks_per_min: 123.5 });
+  assert.equal(res.status, 204);
+  const out = await perfLine((l) => l.includes('"clicks_per_min":123.5'));
+  const clamped = JSON.parse(out.slice(out.indexOf('{')));
+  assert.deepEqual([clamped.secs, clamped.idle_frac, clamped.tier, clamped.hz, clamped.mem], [0, 1, 5, 240, 512]);
+
+  for (const bad of ['{not json', '{}', JSON.stringify({ ...SAMPLE, fx: 'loud' }), JSON.stringify({ ...SAMPLE, hz: '14' }), '{"secs":1e999}']) {
+    res = await telemetry(bad);
+    assert.equal(res.status, 400, bad);
+    await res.arrayBuffer();
+  }
+  res = await telemetry(SAMPLE, { 'sec-fetch-site': 'cross-site' });
+  assert.equal(res.status, 403);
+  res = await telemetry(SAMPLE, { 'content-type': 'text/plain' });
+  assert.equal(res.status, 415);
+  res = await telemetry(JSON.stringify({ ...SAMPLE, pad: 'x'.repeat(1100) }));
+  assert.equal(res.status, 413);
+  res = await fetch(`${BASE}/api/telemetry`);
+  assert.equal(res.status, 405);
+  assert.equal(res.headers.get('allow'), 'POST');
 });
 
 test('static assets are served without the worker and assets are immutable', async () => {
