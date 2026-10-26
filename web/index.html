@@ -684,10 +684,11 @@ function renderShelf(){
   setHidden(shelfEl, !any);
 }
 function renderOrbit(){
-  const perType = orbitMq.matches ? 3 : 4, cap = orbitMq.matches ? 12 : 24;
+  const perType = orbitMq.matches ? 3 : 4, cap = orbitMq.matches ? 6 : 24;
   const counts = owns.map(n => n ? Math.min(perType, 1 + Math.floor(Math.log2(n))) : 0);
   let sum = counts.reduce((a, c) => a + c, 0);
-  while(sum > cap){ counts[counts.lastIndexOf(Math.max(...counts))]--; sum--; }
+  // No empate, corta primeiro os prédios mais baratos: os mais avançados ficam na órbita.
+  while(sum > cap){ counts[counts.indexOf(Math.max(...counts))]--; sum--; }
   const key = counts.join();
   if(key === orbitKey) return;
   orbitKey = key;
